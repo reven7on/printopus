@@ -27,29 +27,27 @@ const products = [
   {
     title: "Футболки и поло",
     copy: "100% плотный хлопок (180–240 г/м²). Премиум посадка, не садится после стирки.",
-    image: "/product-shirt.png",
+    image: "/mockups/spreadshirt/tshirt/tshirt-white-front.png",
     kind: "shirt",
     variants: [
-      { name: "Белый", image: "/mockups/spreadshirt/shirt-white-front.png" },
-      { name: "Чёрный", image: "/mockups/spreadshirt/shirt-black-front.png" },
-      { name: "Серый", image: "/mockups/spreadshirt/shirt-grey-front.png" },
-      { name: "Navy", image: "/mockups/spreadshirt/shirt-navy-front.png" },
-      { name: "Красный", image: "/mockups/spreadshirt/shirt-red-front.png" },
-      { name: "Khaki", image: "/mockups/spreadshirt/shirt-khaki-front.png" },
+      { name: "Белый", image: "/mockups/spreadshirt/tshirt/tshirt-white-front.png" },
+      { name: "Чёрный", image: "/mockups/spreadshirt/tshirt/tshirt-black-front.png" },
+      { name: "Серый", image: "/mockups/spreadshirt/tshirt/tshirt-grey-front.png" },
+      { name: "Navy", image: "/mockups/spreadshirt/tshirt/tshirt-navy-front.png" },
+      { name: "Красный", image: "/mockups/spreadshirt/tshirt/tshirt-red-front.png" },
+      { name: "Khaki", image: "/mockups/spreadshirt/tshirt/tshirt-khaki-front.png" },
     ],
   },
   {
     title: "Толстовки и худи",
     copy: "Утеплённый футер с начёсом (320–380 г/м²). Оверсайз крои и стойкая вышивка.",
-    image: "/mockups/spreadshirt/hoodie/hoodie-gray-front.png",
+    image: "/mockups/spreadshirt/hoodie/hoodie-grey-front.png",
     kind: "hoodie",
     variants: [
       { name: "Белый", image: "/mockups/spreadshirt/hoodie/hoodie-white-front.png" },
       { name: "Чёрный", image: "/mockups/spreadshirt/hoodie/hoodie-black-front.png" },
-      { name: "Серый", image: "/mockups/spreadshirt/hoodie/hoodie-gray-front.png" },
+      { name: "Серый", image: "/mockups/spreadshirt/hoodie/hoodie-grey-front.png" },
       { name: "Navy", image: "/mockups/spreadshirt/hoodie/hoodie-navy-front.png" },
-      { name: "Красный", image: "/mockups/spreadshirt/hoodie/hoodie-red-front.png" },
-      { name: "Бордо", image: "/mockups/spreadshirt/hoodie/hoodie-burgundy-front.png" },
     ],
   },
   {
@@ -60,33 +58,26 @@ const products = [
     variants: [
       { name: "Белый", image: "/mockups/spreadshirt/cap/cap-white-front.png" },
       { name: "Чёрный", image: "/mockups/spreadshirt/cap/cap-black-front.png" },
-      { name: "Серый", image: "/mockups/spreadshirt/cap/cap-gray-front.png" },
       { name: "Navy", image: "/mockups/spreadshirt/cap/cap-navy-front.png" },
-      { name: "Красный", image: "/mockups/spreadshirt/cap/cap-red-front.png" },
-      { name: "Синий", image: "/mockups/spreadshirt/cap/cap-blue-front.png" },
     ],
   },
   {
     title: "Шоперы и сумки",
     copy: "Хлопковый канвас 280 г/м². Нагрузка до 15 кг, стойкая шелкография.",
-    image: "/mockups/spreadshirt/tote/tote-natural-front.png",
+    image: "/mockups/spreadshirt/bag/bag-white-front.png",
     kind: "bag",
     variants: [
-      { name: "Белый", image: "/mockups/spreadshirt/tote/tote-white-front.png" },
-      { name: "Натур.", image: "/mockups/spreadshirt/tote/tote-natural-front.png" },
-      { name: "Чёрный", image: "/mockups/spreadshirt/tote/tote-black-front.png" },
-      { name: "Navy", image: "/mockups/spreadshirt/tote/tote-navy-front.png" },
-      { name: "Красный", image: "/mockups/spreadshirt/tote/tote-red-front.png" },
-      { name: "Зелёный", image: "/mockups/spreadshirt/tote/tote-green-front.png" },
+      { name: "Белый", image: "/mockups/spreadshirt/bag/bag-white-front.png" },
+      { name: "Чёрный", image: "/mockups/spreadshirt/bag/bag-black-front.png" },
     ],
   },
 ];
 
 const basePrices = [
-  { title: "Футболка", note: "Классическая модель из хлопка", price: 25, image: "/product-shirt.png" },
-  { title: "Худи", note: "Утеплённая модель с капюшоном", price: 65, image: "/product-hoodie.png" },
-  { title: "Кепка", note: "Классическая шестипанельная", price: 20, image: "/product-cap.png" },
-  { title: "Шопер", note: "Плотный натуральный хлопок", price: 18, image: "/product-shopper.png" },
+  { title: "Футболка", note: "Классическая модель из хлопка", price: 25, image: "/mockups/spreadshirt/tshirt/tshirt-white-front.png" },
+  { title: "Худи", note: "Утеплённая модель с капюшоном", price: 65, image: "/mockups/spreadshirt/hoodie/hoodie-white-front.png" },
+  { title: "Кепка", note: "Классическая шестипанельная", price: 20, image: "/mockups/spreadshirt/cap/cap-black-front.png" },
+  { title: "Шопер", note: "Плотный натуральный хлопок", price: 18, image: "/mockups/spreadshirt/bag/bag-white-front.png" },
 ];
 
 const printPrices = [
