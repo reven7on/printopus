@@ -186,20 +186,41 @@ function getPrintZoneStyle(zone: PrintZone): CSSProperties {
   };
 }
 
-function getElementToolbarStyle(zone: PrintZone, element: DesignElement): CSSProperties {
+function getElementToolbarStyle(zone: PrintZone, element: DesignElement, zoomed: boolean): CSSProperties {
   const zoneLeft = (zone.x / zone.canvas) * 100;
   const zoneTop = (zone.y / zone.canvas) * 100;
   const zoneWidth = (zone.width / zone.canvas) * 100;
   const zoneHeight = (zone.height / zone.canvas) * 100;
+  const focusOriginX = zoneLeft + zoneWidth / 2;
+  const focusOriginY = zoneTop + zoneHeight / 2;
+  const workspaceScale = zoomed ? getWorkspaceScale(zone) : 1;
   const elementCenterX = zoneLeft + zoneWidth * (element.x / 100);
   const elementCenterY = zoneTop + zoneHeight * (element.y / 100);
   const imageHalfSize = element.type === "image"
     ? zoneWidth * (element.width / 100) * element.scale * 0.5
     : 4;
+  const focusedCenterX = focusOriginX + (elementCenterX - focusOriginX) * workspaceScale;
+  const focusedCenterY = focusOriginY + (elementCenterY - focusOriginY) * workspaceScale;
 
   return {
-    left: `${clamp(elementCenterX, 25, 75)}%`,
-    top: `${clamp(elementCenterY - imageHalfSize - 2, 12, 88)}%`,
+    left: `${clamp(focusedCenterX, 25, 75)}%`,
+    top: `${clamp(focusedCenterY - imageHalfSize * workspaceScale - 2, 12, 88)}%`,
+  };
+}
+
+function getWorkspaceScale(zone: PrintZone) {
+  const largestZoneDimension = Math.max(zone.width, zone.height) / zone.canvas;
+  return +clamp(0.72 / largestZoneDimension, 1.4, 1.7).toFixed(2);
+}
+
+function getWorkspaceCanvasStyle(zone: PrintZone, zoomed: boolean): CSSProperties {
+  if (!zoomed) return {};
+  const originX = ((zone.x + zone.width / 2) / zone.canvas) * 100;
+  const originY = ((zone.y + zone.height / 2) / zone.canvas) * 100;
+
+  return {
+    transform: `scale(${getWorkspaceScale(zone)})`,
+    transformOrigin: `${originX}% ${originY}%`,
   };
 }
 
@@ -243,6 +264,7 @@ function ConfigIcon({ name, size = 24 }: { name: string; size?: number }) {
     layers: <><path d="m12 3 9 5-9 5-9-5Z"/><path d="m3 12 9 5 9-5m-18 4 9 5 9-5"/></>,
     clipboard: <><path d="M7 5h10v16H7z"/><path d="M9 5V2h6v3m-5 7 2 2 4-5"/></>,
     zoom: <><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5m-10-8V8m-2 2h4"/></>,
+    zoomOut: <><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5M7 10h6"/></>,
     rotate: <><path d="M20 7v5h-5"/><path d="M19 12a8 8 0 1 0-2 5"/></>,
     target: <><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3"/></>,
     trash: <><path d="M5 7h14M9 7V4h6v3m2 0-1 14H8L7 7m4 4v6m3-6v6"/></>,
@@ -323,6 +345,7 @@ export default function Configurator() {
   const [textFont, setTextFont] = useState("Arial, sans-serif");
   const [textBold, setTextBold] = useState(true);
   const [mobileDesignPanelOpen, setMobileDesignPanelOpen] = useState(false);
+  const [workspaceZoomed, setWorkspaceZoomed] = useState(false);
   const [historyAvailability, setHistoryAvailability] = useState({ undo: 0, redo: 0 });
 
   const [customerName, setCustomerName] = useState("");
@@ -400,6 +423,7 @@ export default function Configurator() {
     };
     commitDesigns({ ...designs, [viewAngle]: [...designs[viewAngle], newElement] });
     setSelectedElementId(newElement.id);
+    setWorkspaceZoomed(true);
     setFileError("");
   }
 
@@ -468,6 +492,7 @@ export default function Configurator() {
     const nextViewElements = designs[viewAngle].filter((element) => element.id !== selectedElement.id);
     commitDesigns({ ...designs, [viewAngle]: nextViewElements });
     setSelectedElementId(null);
+    if (nextViewElements.length === 0) setWorkspaceZoomed(false);
   }
 
   function addOrUpdateText() {
@@ -502,6 +527,7 @@ export default function Configurator() {
     };
     commitDesigns({ ...designs, [viewAngle]: [...designs[viewAngle], newElement] });
     setSelectedElementId(newElement.id);
+    setWorkspaceZoomed(true);
   }
 
   function selectDesignElement(element: DesignElement) {
@@ -636,6 +662,7 @@ export default function Configurator() {
   function handleSelectViewAngle(angle: ViewAngle) {
     setViewAngle(angle);
     setSelectedElementId(null);
+    setWorkspaceZoomed(designs[angle].length > 0);
     if (angle === "back" && availablePlacements.some((p) => p.id === "back")) setPlacement("back");
     else if (angle === "sleeve_left" && availablePlacements.some((p) => p.id === "sleeve_left")) setPlacement("sleeve_left");
     else if (angle === "sleeve_right" && availablePlacements.some((p) => p.id === "sleeve_right")) setPlacement("sleeve_right");
@@ -728,8 +755,13 @@ export default function Configurator() {
             )}
 
             {/* Authentic Spreadshirt Garment Canvas */}
-            <div className="garment-stage">
-              <div className="garment-canvas" data-product={item} data-view={viewAngle}>
+            <div className={`garment-stage ${workspaceZoomed && hasArtwork ? "workspace-zoomed" : ""}`}>
+              <div
+                className="garment-canvas"
+                data-product={item}
+                data-view={viewAngle}
+                style={currentStep === 3 && currentPrintZone ? getWorkspaceCanvasStyle(currentPrintZone, workspaceZoomed && hasArtwork) : undefined}
+              >
                 {/* Authentic Spreadshirt High-Res Render Image */}
                 <img src={currentMockupImage} alt={selectedItem.label} className="garment-base-img authentic" />
 
@@ -806,10 +838,14 @@ export default function Configurator() {
                     ))}
                   </div>
                 )}
-                {currentStep === 3 && currentPrintZone && selectedElement && (
+                {(hasArtwork || currentStep >= 3) && !currentPrintZone && (
+                  <div className="print-zone-unavailable">На этом ракурсе нанесение недоступно</div>
+                )}
+              </div>
+              {currentStep === 3 && currentPrintZone && selectedElement && (
                   <div
                     className="canvas-element-toolbar"
-                    style={getElementToolbarStyle(currentPrintZone, selectedElement)}
+                    style={getElementToolbarStyle(currentPrintZone, selectedElement, workspaceZoomed)}
                     role="toolbar"
                     aria-label="Управление выбранным элементом"
                   >
@@ -827,10 +863,18 @@ export default function Configurator() {
                     </button>
                   </div>
                 )}
-                {(hasArtwork || currentStep >= 3) && !currentPrintZone && (
-                  <div className="print-zone-unavailable">На этом ракурсе нанесение недоступно</div>
+                {currentStep === 3 && currentPrintZone && hasArtwork && (
+                  <button
+                    type="button"
+                    className={`canvas-workspace-zoom ${workspaceZoomed ? "active" : ""}`}
+                    onClick={() => setWorkspaceZoomed((zoomed) => !zoomed)}
+                    aria-pressed={workspaceZoomed}
+                    aria-label={workspaceZoomed ? "Показать товар целиком" : "Приблизить рабочую область"}
+                    title={workspaceZoomed ? "Показать товар целиком" : "Приблизить рабочую область"}
+                  >
+                    <ConfigIcon name={workspaceZoomed ? "zoomOut" : "zoom"} size={21}/>
+                  </button>
                 )}
-              </div>
               {currentStep === 2 && (
                 <div className="stage-view-navigation" aria-label="Ракурс изделия">
                   <button type="button" onClick={() => cycleViewAngle(-1)} aria-label="Предыдущий ракурс">
