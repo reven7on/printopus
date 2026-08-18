@@ -1,12 +1,48 @@
 "use client";
 
-import type { CSSProperties, ReactNode } from "react";
+import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
 
 type ItemId = "shirt" | "hoodie" | "polo" | "cap" | "bag";
 type ViewAngle = "front" | "back" | "sleeve_left" | "sleeve_right";
 type PlacementId = "center" | "chest_left" | "back" | "sleeve_left" | "sleeve_right";
+type DesignerTool = "image" | "text" | "position";
+type DesignElementType = "image" | "text";
+
+type DesignElement = {
+  id: string;
+  type: DesignElementType;
+  content: string;
+  name: string;
+  x: number;
+  y: number;
+  scale: number;
+  rotation: number;
+  width: number;
+  color?: string;
+  fontFamily?: string;
+  fontWeight?: 500 | 800;
+  quality?: "good" | "medium" | "low" | "vector";
+};
+
+type DesignsByView = Record<ViewAngle, DesignElement[]>;
+
+type TransformGesture = {
+  mode: "move" | "resize";
+  elementId: string;
+  view: ViewAngle;
+  before: DesignsByView;
+  moved: boolean;
+  zoneRect: DOMRect;
+  elementRect: DOMRect;
+  grabOffsetX: number;
+  grabOffsetY: number;
+  centerX: number;
+  centerY: number;
+  startDistance: number;
+  startScale: number;
+};
 
 type PrintZone = {
   canvas: number;
@@ -101,6 +137,24 @@ const placementIdsByItem: Record<ItemId, readonly PlacementId[]> = {
   bag: ["center", "back"],
 };
 
+function createEmptyDesigns(): DesignsByView {
+  return {
+    front: [],
+    back: [],
+    sleeve_left: [],
+    sleeve_right: [],
+  };
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function getInitialElementPosition(placementId: PlacementId) {
+  if (placementId === "chest_left") return { x: 76, y: 20, scale: 0.58 };
+  return { x: 50, y: 46, scale: 1 };
+}
+
 function getPrintZone(itemKey: ItemId, viewAngleKey: ViewAngle) {
   return printZones[itemKey][viewAngleKey];
 }
@@ -157,6 +211,15 @@ function ConfigIcon({ name, size = 24 }: { name: string; size?: number }) {
     rotate: <><path d="M20 7v5h-5"/><path d="M19 12a8 8 0 1 0-2 5"/></>,
     target: <><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3"/></>,
     trash: <><path d="M5 7h14M9 7V4h6v3m2 0-1 14H8L7 7m4 4v6m3-6v6"/></>,
+    image: <><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9" r="1.5"/><path d="m4 17 5-5 4 4 2-2 5 4"/></>,
+    type: <><path d="M5 5h14M12 5v14M8 19h8"/></>,
+    move: <><path d="M12 2v20m0-20-3 3m3-3 3 3M12 22l-3-3m3 3 3-3M2 12h20M2 12l3-3m-3 3 3 3m17-3-3-3m3 3-3 3"/></>,
+    undo: <><path d="M9 7 4 12l5 5"/><path d="M5 12h8a6 6 0 0 1 6 6"/></>,
+    redo: <><path d="m15 7 5 5-5 5"/><path d="M19 12h-8a6 6 0 0 0-6 6"/></>,
+    minus: <path d="M5 12h14"/>,
+    plus: <path d="M12 5v14M5 12h14"/>,
+    bold: <><path d="M8 5h5a3 3 0 0 1 0 6H8Zm0 6h6a4 4 0 0 1 0 8H8Z"/></>,
+    warning: <><path d="M12 3 2.5 20h19Z"/><path d="M12 9v4m0 3h.01"/></>,
     check: <path d="m5 12 4 4L19 6"/>,
     arrowRight: <path d="M5 12h14m-5-5 5 5-5 5"/>,
     arrowLeft: <path d="M19 12H5m5-5-5 5 5 5"/>,
@@ -213,10 +276,15 @@ export default function Configurator() {
   const [sizeFormat, setSizeFormat] = useState("A4");
   const [qty, setQty] = useState(30);
   
-  const [fileName, setFileName] = useState("");
-  const [preview, setPreview] = useState("");
-  const [artScale, setArtScale] = useState(1);
-  const [artRotation, setArtRotation] = useState(0);
+  const [fileError, setFileError] = useState("");
+  const [designs, setDesigns] = useState<DesignsByView>(createEmptyDesigns);
+  const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
+  const [activeDesignerTool, setActiveDesignerTool] = useState<DesignerTool>("image");
+  const [textValue, setTextValue] = useState("Ваш текст");
+  const [textColor, setTextColor] = useState("#111111");
+  const [textFont, setTextFont] = useState("Arial, sans-serif");
+  const [textBold, setTextBold] = useState(true);
+  const [historyAvailability, setHistoryAvailability] = useState({ undo: 0, redo: 0 });
 
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
@@ -224,6 +292,10 @@ export default function Configurator() {
   const [submitted, setSubmitted] = useState(false);
   const [orderId, setOrderId] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const historyRef = useRef<DesignsByView[]>([]);
+  const redoRef = useRef<DesignsByView[]>([]);
+  const transformGestureRef = useRef<TransformGesture | null>(null);
+  const nextElementIdRef = useRef(0);
 
   const selectedItem = items.find((i) => i.id === item)!;
   const selectedColor = garmentColors.find((c) => c.id === color)!;
@@ -233,6 +305,10 @@ export default function Configurator() {
   const availablePlacements = getAvailablePlacementsForItem(item);
   const selectedPlacementCopy = getPlacementCopy(item, selectedPlacement);
   const currentPrintZone = getPrintZone(item, viewAngle);
+  const currentElements = designs[viewAngle];
+  const selectedElement = currentElements.find((element) => element.id === selectedElementId) ?? null;
+  const hasArtwork = currentElements.length > 0;
+  const designElementsCount = Object.values(designs).reduce((total, elements) => total + elements.length, 0);
 
   // Authentic Spreadshirt PNG mockups mapped per product, color & view
   const currentMockupImage = useMemo(() => {
@@ -247,21 +323,241 @@ export default function Configurator() {
 
   const totalPrice = +(unitPrice * qty).toFixed(2);
 
+  function commitDesigns(nextDesigns: DesignsByView) {
+    historyRef.current = [...historyRef.current.slice(-29), designs];
+    redoRef.current = [];
+    setDesigns(nextDesigns);
+    setHistoryAvailability({ undo: historyRef.current.length, redo: 0 });
+  }
+
+  function addImageElement(source: string, sourceFile: File, quality: DesignElement["quality"]) {
+    const initial = getInitialElementPosition(placement);
+    nextElementIdRef.current += 1;
+    const newElement: DesignElement = {
+      id: `image-${nextElementIdRef.current}`,
+      type: "image",
+      content: source,
+      name: sourceFile.name,
+      x: initial.x,
+      y: initial.y,
+      scale: initial.scale,
+      rotation: 0,
+      width: 76,
+      quality,
+    };
+    commitDesigns({ ...designs, [viewAngle]: [...designs[viewAngle], newElement] });
+    setSelectedElementId(newElement.id);
+    setFileError("");
+  }
+
   function handleFile(file?: File) {
     if (!file) return;
-    setFileName(file.name);
-    if (file.type.startsWith("image/")) {
-      const reader = new FileReader();
-      reader.onload = () => setPreview(String(reader.result));
-      reader.readAsDataURL(file);
+    const extension = file.name.split(".").pop()?.toLowerCase();
+    const allowedExtensions = ["png", "jpg", "jpeg", "webp", "svg"];
+    if (!extension || !allowedExtensions.includes(extension)) {
+      setFileError("Поддерживаются PNG, JPG, WebP и SVG.");
+      return;
+    }
+    if (file.size > 20 * 1024 * 1024) {
+      setFileError("Файл больше 20 МБ. Уменьшите его и загрузите снова.");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onerror = () => setFileError("Не удалось прочитать файл. Попробуйте другой.");
+    reader.onload = () => {
+      const source = String(reader.result);
+      if (extension === "svg") {
+        addImageElement(source, file, "vector");
+        return;
+      }
+      const image = new Image();
+      image.onload = () => {
+        const shortestSide = Math.min(image.naturalWidth, image.naturalHeight);
+        const quality: DesignElement["quality"] = shortestSide >= 1200 ? "good" : shortestSide >= 700 ? "medium" : "low";
+        addImageElement(source, file, quality);
+      };
+      image.onerror = () => setFileError("Изображение повреждено или не поддерживается.");
+      image.src = source;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function updateElementLive(targetView: ViewAngle, elementId: string, patch: Partial<DesignElement>) {
+    setDesigns((current) => ({
+      ...current,
+      [targetView]: current[targetView].map((element) => element.id === elementId ? { ...element, ...patch } : element),
+    }));
+  }
+
+  function updateSelectedElement(patch: Partial<DesignElement>) {
+    if (!selectedElement) return;
+    commitDesigns({
+      ...designs,
+      [viewAngle]: designs[viewAngle].map((element) => element.id === selectedElement.id ? { ...element, ...patch } : element),
+    });
+  }
+
+  function deleteSelectedElement() {
+    if (!selectedElement) return;
+    const nextViewElements = designs[viewAngle].filter((element) => element.id !== selectedElement.id);
+    commitDesigns({ ...designs, [viewAngle]: nextViewElements });
+    setSelectedElementId(null);
+  }
+
+  function addOrUpdateText() {
+    const cleanText = textValue.trim();
+    if (!cleanText) return;
+    if (selectedElement?.type === "text") {
+      updateSelectedElement({
+        content: cleanText,
+        name: cleanText,
+        color: textColor,
+        fontFamily: textFont,
+        fontWeight: textBold ? 800 : 500,
+      });
+      return;
+    }
+
+    const initial = getInitialElementPosition(placement);
+    nextElementIdRef.current += 1;
+    const newElement: DesignElement = {
+      id: `text-${nextElementIdRef.current}`,
+      type: "text",
+      content: cleanText,
+      name: cleanText,
+      x: initial.x,
+      y: initial.y,
+      scale: initial.scale,
+      rotation: 0,
+      width: 70,
+      color: textColor,
+      fontFamily: textFont,
+      fontWeight: textBold ? 800 : 500,
+    };
+    commitDesigns({ ...designs, [viewAngle]: [...designs[viewAngle], newElement] });
+    setSelectedElementId(newElement.id);
+  }
+
+  function selectDesignElement(element: DesignElement) {
+    setSelectedElementId(element.id);
+    setActiveDesignerTool(element.type);
+    if (element.type === "text") {
+      setTextValue(element.content);
+      setTextColor(element.color ?? "#111111");
+      setTextFont(element.fontFamily ?? "Arial, sans-serif");
+      setTextBold(element.fontWeight === 800);
     }
   }
 
-  function clearArtwork() {
-    setPreview("");
-    setFileName("");
-    setArtScale(1);
-    setArtRotation(0);
+  function undoDesignChange() {
+    const previous = historyRef.current.at(-1);
+    if (!previous) return;
+    redoRef.current = [...redoRef.current, designs];
+    historyRef.current = historyRef.current.slice(0, -1);
+    setDesigns(previous);
+    setSelectedElementId(null);
+    setHistoryAvailability({ undo: historyRef.current.length, redo: redoRef.current.length });
+  }
+
+  function redoDesignChange() {
+    const next = redoRef.current.at(-1);
+    if (!next) return;
+    historyRef.current = [...historyRef.current, designs];
+    redoRef.current = redoRef.current.slice(0, -1);
+    setDesigns(next);
+    setSelectedElementId(null);
+    setHistoryAvailability({ undo: historyRef.current.length, redo: redoRef.current.length });
+  }
+
+  function startMoveGesture(event: ReactPointerEvent<HTMLButtonElement>, element: DesignElement) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    selectDesignElement(element);
+    const elementRect = event.currentTarget.getBoundingClientRect();
+    const zoneRect = event.currentTarget.parentElement?.getBoundingClientRect();
+    if (!zoneRect) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    transformGestureRef.current = {
+      mode: "move",
+      elementId: element.id,
+      view: viewAngle,
+      before: designs,
+      moved: false,
+      zoneRect,
+      elementRect,
+      grabOffsetX: event.clientX - (elementRect.left + elementRect.width / 2),
+      grabOffsetY: event.clientY - (elementRect.top + elementRect.height / 2),
+      centerX: elementRect.left + elementRect.width / 2,
+      centerY: elementRect.top + elementRect.height / 2,
+      startDistance: 0,
+      startScale: element.scale,
+    };
+  }
+
+  function startResizeGesture(event: ReactPointerEvent<HTMLSpanElement>, element: DesignElement) {
+    event.preventDefault();
+    event.stopPropagation();
+    const elementNode = event.currentTarget.parentElement;
+    const zoneNode = elementNode?.parentElement;
+    if (!elementNode || !zoneNode) return;
+    const elementRect = elementNode.getBoundingClientRect();
+    const zoneRect = zoneNode.getBoundingClientRect();
+    const centerX = elementRect.left + elementRect.width / 2;
+    const centerY = elementRect.top + elementRect.height / 2;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    transformGestureRef.current = {
+      mode: "resize",
+      elementId: element.id,
+      view: viewAngle,
+      before: designs,
+      moved: false,
+      zoneRect,
+      elementRect,
+      grabOffsetX: 0,
+      grabOffsetY: 0,
+      centerX,
+      centerY,
+      startDistance: Math.max(1, Math.hypot(event.clientX - centerX, event.clientY - centerY)),
+      startScale: element.scale,
+    };
+  }
+
+  function handleTransformMove(event: ReactPointerEvent<HTMLElement>) {
+    const gesture = transformGestureRef.current;
+    if (!gesture) return;
+    event.preventDefault();
+    gesture.moved = true;
+    if (gesture.mode === "resize") {
+      const distance = Math.hypot(event.clientX - gesture.centerX, event.clientY - gesture.centerY);
+      updateElementLive(gesture.view, gesture.elementId, {
+        scale: +clamp(gesture.startScale * (distance / gesture.startDistance), 0.35, 2.2).toFixed(2),
+      });
+      return;
+    }
+
+    const halfWidth = Math.min(45, (gesture.elementRect.width / gesture.zoneRect.width) * 50);
+    const halfHeight = Math.min(45, (gesture.elementRect.height / gesture.zoneRect.height) * 50);
+    const x = ((event.clientX - gesture.grabOffsetX - gesture.zoneRect.left) / gesture.zoneRect.width) * 100;
+    const y = ((event.clientY - gesture.grabOffsetY - gesture.zoneRect.top) / gesture.zoneRect.height) * 100;
+    updateElementLive(gesture.view, gesture.elementId, {
+      x: +clamp(x, halfWidth, 100 - halfWidth).toFixed(2),
+      y: +clamp(y, halfHeight, 100 - halfHeight).toFixed(2),
+    });
+  }
+
+  function finishTransformGesture(event: ReactPointerEvent<HTMLElement>) {
+    const gesture = transformGestureRef.current;
+    if (!gesture) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    if (gesture.moved) {
+      historyRef.current = [...historyRef.current.slice(-29), gesture.before];
+      redoRef.current = [];
+      setHistoryAvailability({ undo: historyRef.current.length, redo: 0 });
+    }
+    transformGestureRef.current = null;
   }
 
   function handleSelectPlacement(pId: PlacementId) {
@@ -269,6 +565,7 @@ export default function Configurator() {
     const targetPlacement = placements.find((p) => p.id === pId);
     if (targetPlacement) {
       setViewAngle(targetPlacement.view as ViewAngle);
+      setSelectedElementId(null);
     }
   }
 
@@ -282,6 +579,7 @@ export default function Configurator() {
 
   function handleSelectViewAngle(angle: ViewAngle) {
     setViewAngle(angle);
+    setSelectedElementId(null);
     if (angle === "back" && availablePlacements.some((p) => p.id === "back")) setPlacement("back");
     else if (angle === "sleeve_left" && availablePlacements.some((p) => p.id === "sleeve_left")) setPlacement("sleeve_left");
     else if (angle === "sleeve_right" && availablePlacements.some((p) => p.id === "sleeve_right")) setPlacement("sleeve_right");
@@ -350,6 +648,16 @@ export default function Configurator() {
           <div className="stage-card">
             <div className="stage-header">
               <span className="stage-badge">{selectedItem.label} · {selectedColor.label}</span>
+              {currentStep === 3 && (
+                <div className="design-history-actions" aria-label="История изменений макета">
+                  <button type="button" onClick={undoDesignChange} disabled={!historyAvailability.undo} aria-label="Отменить" title="Отменить">
+                    <ConfigIcon name="undo" size={17}/>
+                  </button>
+                  <button type="button" onClick={redoDesignChange} disabled={!historyAvailability.redo} aria-label="Повторить" title="Повторить">
+                    <ConfigIcon name="redo" size={17}/>
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Authentic Spreadshirt Garment Canvas */}
@@ -359,31 +667,60 @@ export default function Configurator() {
                 <img src={currentMockupImage} alt={selectedItem.label} className="garment-base-img authentic" />
 
                 {/* The zone and product share one square coordinate system at every viewport size. */}
-                {(preview || currentStep >= 3) && currentPrintZone && (
+                {(hasArtwork || currentStep >= 3) && currentPrintZone && (
                   <div
-                    className={`canvas-print-zone ${preview ? "has-image" : ""}`}
+                    className={`canvas-print-zone ${hasArtwork ? "has-image" : ""} ${currentStep === 3 ? "is-editable" : ""}`}
                     style={getPrintZoneStyle(currentPrintZone)}
                     aria-label={`Допустимая область печати: ${selectedItem.label}, ${viewAngle}`}
+                    onPointerDown={(event) => {
+                      if (event.target === event.currentTarget) setSelectedElementId(null);
+                    }}
                   >
-                    {!preview && currentPrintZone.width / currentPrintZone.canvas >= 0.18 && (
+                    {!hasArtwork && currentPrintZone.width / currentPrintZone.canvas >= 0.18 && (
                       <span className="print-zone-label">
                         {currentPrintZone.width / currentPrintZone.canvas < 0.25 ? "Принт" : "Зона печати"}
                       </span>
                     )}
-                    {preview && (
-                      <div className={`canvas-artwork-position art-pos-${placement}`}>
-                        <div
-                          className="canvas-artwork"
-                          style={{
-                            backgroundImage: `url(${preview})`,
-                            transform: `scale(${artScale}) rotate(${artRotation}deg)`,
-                          }}
-                        />
-                      </div>
-                    )}
+                    {currentElements.map((element) => (
+                      <button
+                        key={element.id}
+                        className={`canvas-design-element design-element-${element.type} ${selectedElementId === element.id ? "selected" : ""}`}
+                        style={{
+                          left: `${element.x}%`,
+                          top: `${element.y}%`,
+                          width: element.type === "image" ? `${element.width}%` : undefined,
+                          color: element.color,
+                          fontFamily: element.fontFamily,
+                          fontWeight: element.fontWeight,
+                          transform: `translate(-50%, -50%) rotate(${element.rotation}deg) scale(${element.scale})`,
+                        }}
+                        type="button"
+                        aria-label={`${element.type === "image" ? "Изображение" : "Текст"}: ${element.name}`}
+                        onPointerDown={(event) => startMoveGesture(event, element)}
+                        onPointerMove={handleTransformMove}
+                        onPointerUp={finishTransformGesture}
+                        onPointerCancel={finishTransformGesture}
+                      >
+                        {element.type === "image" ? (
+                          <img src={element.content} alt="" draggable={false} />
+                        ) : (
+                          <span>{element.content}</span>
+                        )}
+                        {selectedElementId === element.id && currentStep === 3 && (
+                          <span
+                            className="design-resize-handle"
+                            aria-hidden="true"
+                            onPointerDown={(event) => startResizeGesture(event, element)}
+                            onPointerMove={(event) => { event.stopPropagation(); handleTransformMove(event); }}
+                            onPointerUp={(event) => { event.stopPropagation(); finishTransformGesture(event); }}
+                            onPointerCancel={(event) => { event.stopPropagation(); finishTransformGesture(event); }}
+                          />
+                        )}
+                      </button>
+                    ))}
                   </div>
                 )}
-                {(preview || currentStep >= 3) && !currentPrintZone && (
+                {(hasArtwork || currentStep >= 3) && !currentPrintZone && (
                   <div className="print-zone-unavailable">На этом ракурсе нанесение недоступно</div>
                 )}
               </div>
@@ -417,22 +754,21 @@ export default function Configurator() {
               })}
             </div>
 
-            {/* Quick Canvas Transform Controls */}
-            {preview && (
-              <div className="canvas-transform-toolbar mt-3">
-                <button onClick={() => setArtScale((v) => Math.min(1.5, +(v + 0.1).toFixed(1)))} title="Увеличить">
-                  <ConfigIcon name="zoom" size={16}/> +
+            {currentStep === 3 && selectedElement && (
+              <div className="canvas-transform-toolbar" aria-label="Настройки выбранного элемента">
+                <button type="button" onClick={() => updateSelectedElement({ scale: +clamp(selectedElement.scale - 0.1, 0.35, 2.2).toFixed(2) })} title="Уменьшить" aria-label="Уменьшить">
+                  <ConfigIcon name="minus" size={16}/>
                 </button>
-                <button onClick={() => setArtScale((v) => Math.max(0.5, +(v - 0.1).toFixed(1)))} title="Уменьшить">
-                  −
+                <button type="button" onClick={() => updateSelectedElement({ scale: +clamp(selectedElement.scale + 0.1, 0.35, 2.2).toFixed(2) })} title="Увеличить" aria-label="Увеличить">
+                  <ConfigIcon name="plus" size={16}/>
                 </button>
-                <button onClick={() => setArtRotation((v) => (v + 15) % 360)} title="Повернуть">
-                  <ConfigIcon name="rotate" size={16}/> 15°
+                <button type="button" onClick={() => updateSelectedElement({ rotation: (selectedElement.rotation + 15) % 360 })} title="Повернуть на 15 градусов">
+                  <ConfigIcon name="rotate" size={16}/><span>15°</span>
                 </button>
-                <button onClick={() => { setArtScale(1); setArtRotation(0); }} title="По центру">
-                  <ConfigIcon name="target" size={16}/> Сброс
+                <button type="button" onClick={() => updateSelectedElement({ x: 50, y: 46 })} title="Разместить по центру">
+                  <ConfigIcon name="target" size={16}/><span>По центру</span>
                 </button>
-                <button onClick={clearArtwork} className="danger" title="Удалить">
+                <button type="button" onClick={deleteSelectedElement} className="danger" title="Удалить" aria-label="Удалить">
                   <ConfigIcon name="trash" size={16}/>
                 </button>
               </div>
@@ -525,49 +861,145 @@ export default function Configurator() {
 
           {/* STEP 3: UPLOAD & POSITIONING */}
           {currentStep === 3 && (
-            <div className="step-pane animate-fade">
+            <div className="step-pane designer-pane animate-fade">
               <div className="step-pane-header">
-                <h2>3. Макет и область нанесения</h2>
-                <p>Загрузите логотип или принт и выберите расположение на одежде.</p>
+                <h2>3. Создайте макет</h2>
+                <p>Добавьте изображение или текст. Перемещайте выбранный элемент прямо на товаре.</p>
               </div>
 
-              <div className="section-block">
-                <h3>Расположение принта</h3>
-                <div className="placements-grid">
-                  {availablePlacements.map((p) => {
-                    const placementCopy = getPlacementCopy(item, p);
-                    return (
-                      <button
-                        key={p.id}
-                        className={`placement-card ${placement === p.id ? "selected" : ""}`}
-                        onClick={() => handleSelectPlacement(p.id)}
-                        type="button"
-                      >
-                        <b>{placementCopy.label}</b>
-                        <small>{placementCopy.sub}</small>
+              <div className="designer-tool-tabs" role="tablist" aria-label="Инструменты конструктора">
+                {[
+                  { id: "image", label: "Изображение", icon: "image" },
+                  { id: "text", label: "Текст", icon: "type" },
+                  { id: "position", label: "Положение", icon: "move" },
+                ].map((tool) => (
+                  <button
+                    key={tool.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={activeDesignerTool === tool.id}
+                    className={activeDesignerTool === tool.id ? "active" : ""}
+                    onClick={() => setActiveDesignerTool(tool.id as DesignerTool)}
+                  >
+                    <ConfigIcon name={tool.icon} size={20}/>
+                    <span>{tool.label}</span>
+                  </button>
+                ))}
+              </div>
+
+              <div className="designer-tool-panel">
+                {activeDesignerTool === "image" && (
+                  <div className="designer-image-panel">
+                    <div
+                      className="upload-dropzone designer-upload"
+                      onDragOver={(event) => event.preventDefault()}
+                      onDrop={(event) => { event.preventDefault(); handleFile(event.dataTransfer.files[0]); }}
+                    >
+                      <span className="upload-icon-wrap"><ConfigIcon name="upload" size={24}/></span>
+                      <div className="upload-prompt">
+                        <p><b>Добавьте логотип или изображение</b></p>
+                        <small>PNG, JPG, WebP или SVG · до 20 МБ</small>
+                      </div>
+                      <button className="button button-primary button-small" type="button" onClick={() => inputRef.current?.click()}>
+                        Выбрать файл
                       </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="upload-dropzone" onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); handleFile(e.dataTransfer.files[0]); }}>
-                <ConfigIcon name="upload" size={40} />
-                {fileName ? (
-                  <div className="uploaded-file-info">
-                    <b>{fileName}</b>
-                    <span>Макет успешно прикреплен</span>
-                    <button className="button button-small outline mt-2" onClick={() => inputRef.current?.click()}>Заменить файл</button>
-                  </div>
-                ) : (
-                  <div className="upload-prompt">
-                    <p><b>Перетащите файл принта</b> или нажмите кнопку</p>
-                    <button className="button button-small" onClick={() => inputRef.current?.click()}>Загрузить файл</button>
-                    <small>Форматы: PNG, JPG, SVG, AI, EPS, PDF (до 50 МБ)</small>
+                    </div>
+                    {fileError && <div className="designer-message error"><ConfigIcon name="warning" size={16}/>{fileError}</div>}
+                    {selectedElement?.type === "image" && (
+                      <div className={`designer-message quality ${selectedElement.quality === "low" ? "warning" : "good"}`}>
+                        <ConfigIcon name={selectedElement.quality === "low" ? "warning" : "check"} size={16}/>
+                        <span>
+                          {selectedElement.quality === "vector" && "Векторный файл — подходит для печати"}
+                          {selectedElement.quality === "good" && "Высокое качество изображения"}
+                          {selectedElement.quality === "medium" && "Качество достаточное для среднего принта"}
+                          {selectedElement.quality === "low" && "Низкое разрешение — изображение может быть размытым"}
+                        </span>
+                      </div>
+                    )}
+                    <input
+                      ref={inputRef}
+                      type="file"
+                      accept=".png,.jpg,.jpeg,.webp,.svg"
+                      hidden
+                      onChange={(event) => {
+                        handleFile(event.target.files?.[0]);
+                        event.currentTarget.value = "";
+                      }}
+                    />
                   </div>
                 )}
-                <input ref={inputRef} type="file" accept=".png,.jpg,.jpeg,.svg,.ai,.eps,.pdf" style={{ display: "none" }} onChange={(e) => handleFile(e.target.files?.[0])} />
+
+                {activeDesignerTool === "text" && (
+                  <div className="designer-text-panel">
+                    <label className="designer-field designer-text-field">
+                      <span>Надпись</span>
+                      <input value={textValue} maxLength={60} onChange={(event) => setTextValue(event.target.value)} placeholder="Введите текст" />
+                    </label>
+                    <label className="designer-field">
+                      <span>Шрифт</span>
+                      <select value={textFont} onChange={(event) => setTextFont(event.target.value)}>
+                        <option value="Arial, sans-serif">Arial</option>
+                        <option value="Verdana, sans-serif">Verdana</option>
+                        <option value="Georgia, serif">Georgia</option>
+                        <option value="Trebuchet MS, sans-serif">Trebuchet</option>
+                        <option value="Courier New, monospace">Courier</option>
+                      </select>
+                    </label>
+                    <div className="designer-text-options">
+                      <label className="designer-color-control" title="Цвет текста">
+                        <span style={{ backgroundColor: textColor }} />
+                        <input type="color" value={textColor} onChange={(event) => setTextColor(event.target.value)} aria-label="Цвет текста" />
+                        Цвет
+                      </label>
+                      <button type="button" className={`designer-format-button ${textBold ? "active" : ""}`} onClick={() => setTextBold((value) => !value)} aria-pressed={textBold}>
+                        <ConfigIcon name="bold" size={18}/> Жирный
+                      </button>
+                      <button type="button" className="button button-primary" onClick={addOrUpdateText} disabled={!textValue.trim()}>
+                        <ConfigIcon name="plus" size={17}/>
+                        {selectedElement?.type === "text" ? "Сохранить" : "Добавить"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {activeDesignerTool === "position" && (
+                  <div className="placements-grid designer-placements">
+                    {availablePlacements.map((placementOption) => {
+                      const placementCopy = getPlacementCopy(item, placementOption);
+                      return (
+                        <button
+                          key={placementOption.id}
+                          className={`placement-card ${placement === placementOption.id ? "selected" : ""}`}
+                          onClick={() => handleSelectPlacement(placementOption.id)}
+                          type="button"
+                        >
+                          <b>{placementCopy.label}</b>
+                          <small>{placementCopy.sub}</small>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
+
+              {currentElements.length > 0 && (
+                <div className="designer-elements-row">
+                  <span className="designer-elements-label">На этой стороне</span>
+                  <div className="designer-element-chips">
+                    {currentElements.map((element, index) => (
+                      <button
+                        key={element.id}
+                        type="button"
+                        className={selectedElementId === element.id ? "active" : ""}
+                        onClick={() => selectDesignElement(element)}
+                      >
+                        <ConfigIcon name={element.type === "image" ? "image" : "type"} size={15}/>
+                        <span>{element.type === "image" ? element.name : element.content || `Текст ${index + 1}`}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="step-actions-row desktop-only">
                 <button className="button outline" onClick={() => setCurrentStep(2)}>
@@ -677,7 +1109,7 @@ export default function Configurator() {
                       <div className="summary-row"><span>Изделие:</span><b>{selectedItem.label} ({selectedColor.label})</b></div>
                       <div className="summary-row"><span>Печать:</span><b>{methods[method].label} ({selectedSize.label})</b></div>
                       <div className="summary-row"><span>Расположение:</span><b>{selectedPlacementCopy.label}</b></div>
-                      <div className="summary-row"><span>Файл принта:</span><b>{fileName || "Не загружен"}</b></div>
+                      <div className="summary-row"><span>Макет:</span><b>{designElementsCount ? `${designElementsCount} элем.` : "Не добавлен"}</b></div>
                       <div className="summary-row"><span>Количество:</span><b>{qty} шт.</b></div>
                       <hr className="my-2"/>
                       <div className="summary-row total"><span>Итоговая сумма:</span><strong>{totalPrice} BYN</strong></div>
