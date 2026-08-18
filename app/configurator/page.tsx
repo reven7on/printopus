@@ -642,7 +642,7 @@ export default function Configurator() {
   }
 
   return (
-    <main className={`config-wizard-page current-step-${currentStep}`}>
+    <main className={`config-wizard-page current-step-${currentStep} ${submitted ? "is-submitted" : ""}`}>
       {/* Header */}
       <header className="config-nav-header">
         <div className="config-header-container">

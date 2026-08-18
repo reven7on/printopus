@@ -1757,6 +1757,10 @@ footer{background:#141517;color:#fff;padding:55px 6vw;display:grid;grid-template
     gap: 8px;
   }
 
+  .config-wizard-page:not(.current-step-3):not(.is-submitted) .config-wizard-body {
+    margin-top: 74px;
+  }
+
   .stage-card {
     position: static;
     padding: 10px;
@@ -2166,6 +2170,14 @@ footer{background:#141517;color:#fff;padding:55px 6vw;display:grid;grid-template
     justify-content: space-between;
     z-index: 100;
     box-shadow: 0 -4px 20px rgba(0,0,0,0.08);
+  }
+
+  .mobile-config-sticky-footer:not(.designer-mobile-footer) {
+    top: 4px;
+    bottom: auto;
+    border-top: 0;
+    border-bottom: 1px solid #e5e7eb;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.08);
   }
 
   .sticky-price-info small { display: block; font-size: 10.5px; color: #6b7280; }
