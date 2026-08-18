@@ -24,60 +24,17 @@ function Icon({ name }: { name: string }) {
 }
 
 const products = [
-  {
-    title: "Футболки и поло",
-    copy: "100% плотный хлопок (180–240 г/м²). Премиум посадка, не садится после стирки.",
-    image: "/mockups/spreadshirt/tshirt/tshirt-white-front.png",
-    kind: "shirt",
-    variants: [
-      { name: "Белый", image: "/mockups/spreadshirt/tshirt/tshirt-white-front.png" },
-      { name: "Чёрный", image: "/mockups/spreadshirt/tshirt/tshirt-black-front.png" },
-      { name: "Серый", image: "/mockups/spreadshirt/tshirt/tshirt-grey-front.png" },
-      { name: "Navy", image: "/mockups/spreadshirt/tshirt/tshirt-navy-front.png" },
-      { name: "Красный", image: "/mockups/spreadshirt/tshirt/tshirt-red-front.png" },
-      { name: "Khaki", image: "/mockups/spreadshirt/tshirt/tshirt-khaki-front.png" },
-    ],
-  },
-  {
-    title: "Толстовки и худи",
-    copy: "Утеплённый футер с начёсом (320–380 г/м²). Оверсайз крои и стойкая вышивка.",
-    image: "/mockups/spreadshirt/hoodie/hoodie-grey-front.png",
-    kind: "hoodie",
-    variants: [
-      { name: "Белый", image: "/mockups/spreadshirt/hoodie/hoodie-white-front.png" },
-      { name: "Чёрный", image: "/mockups/spreadshirt/hoodie/hoodie-black-front.png" },
-      { name: "Серый", image: "/mockups/spreadshirt/hoodie/hoodie-grey-front.png" },
-      { name: "Navy", image: "/mockups/spreadshirt/hoodie/hoodie-navy-front.png" },
-    ],
-  },
-  {
-    title: "Головные уборы",
-    copy: "6-панельные бейсболки и snapback. Объёмная 3D-вышивка и аккуратные шевроны.",
-    image: "/mockups/spreadshirt/cap/cap-black-front.png",
-    kind: "cap",
-    variants: [
-      { name: "Белый", image: "/mockups/spreadshirt/cap/cap-white-front.png" },
-      { name: "Чёрный", image: "/mockups/spreadshirt/cap/cap-black-front.png" },
-      { name: "Navy", image: "/mockups/spreadshirt/cap/cap-navy-front.png" },
-    ],
-  },
-  {
-    title: "Шоперы и сумки",
-    copy: "Хлопковый канвас 280 г/м². Нагрузка до 15 кг, стойкая шелкография.",
-    image: "/mockups/spreadshirt/bag/bag-white-front.png",
-    kind: "bag",
-    variants: [
-      { name: "Белый", image: "/mockups/spreadshirt/bag/bag-white-front.png" },
-      { name: "Чёрный", image: "/mockups/spreadshirt/bag/bag-black-front.png" },
-    ],
-  },
+  { title: "Футболки и поло", copy: "100% плотный хлопок (180–240 г/м²). Премиум посадка, не садится после стирки.", image: "/product-shirt.png", kind: "shirt" },
+  { title: "Толстовки и худи", copy: "Утеплённый футер с начёсом (320–380 г/м²). Оверсайз крои и стойкая вышивка.", image: "/product-hoodie.png", kind: "hoodie" },
+  { title: "Головные уборы", copy: "6-панельные бейсболки и шапки. Объёмная 3D-вышивка и аккуратные шевроны.", image: "/product-cap.png", kind: "cap" },
+  { title: "Шоперы и сумки", copy: "Хлопковый канвас 280 г/м². Нагрузка до 15 кг, стойкая шелкография.", image: "/product-shopper.png", kind: "bag" },
 ];
 
 const basePrices = [
-  { title: "Футболка", note: "Классическая модель из хлопка", price: 25, image: "/mockups/spreadshirt/tshirt/tshirt-white-front.png" },
-  { title: "Худи", note: "Утеплённая модель с капюшоном", price: 65, image: "/mockups/spreadshirt/hoodie/hoodie-white-front.png" },
-  { title: "Кепка", note: "Классическая шестипанельная", price: 20, image: "/mockups/spreadshirt/cap/cap-black-front.png" },
-  { title: "Шопер", note: "Плотный натуральный хлопок", price: 18, image: "/mockups/spreadshirt/bag/bag-white-front.png" },
+  { title: "Футболка", note: "Классическая модель из хлопка", price: 25, image: "/product-shirt.png" },
+  { title: "Худи", note: "Утеплённая модель с капюшоном", price: 65, image: "/product-hoodie.png" },
+  { title: "Кепка", note: "Классическая шестипанельная", price: 20, image: "/product-cap.png" },
+  { title: "Шопер", note: "Плотный натуральный хлопок", price: 18, image: "/product-shopper.png" },
 ];
 
 const printPrices = [
@@ -100,17 +57,17 @@ const faqs = [
 function FormatShirtIcon({ scale, size }: { scale: string; size: string }) {
   // Precision print area overlay coordinates on real studio photo /product-shirt.png (viewBox 100x100)
   const printZones: Record<string, { x: number; y: number; width: number; height: number }> = {
-    xs: { x: 32.5,  y: 19, width: 7.0,  height: 9.9 },  // A7 — left chest logo
-    sm: { x: 45.05, y: 19, width: 9.9,  height: 14.0 }, // A6 — small front
-    md: { x: 43.05, y: 19, width: 13.9, height: 19.7 }, // A5 — compact front
-    lg: { x: 40.15, y: 19, width: 19.7, height: 27.9 }, // A4 — standard front
-    xl: { x: 36.05, y: 19, width: 27.9, height: 39.5 }, // A3 — large front
+    xs: { x: 32.5,  y: 28, width: 7.0,  height: 9.9 },  // A7 — left chest logo
+    sm: { x: 45.05, y: 28, width: 9.9,  height: 14.0 }, // A6 — small front
+    md: { x: 43.05, y: 28, width: 13.9, height: 19.7 }, // A5 — compact front
+    lg: { x: 40.15, y: 28, width: 19.7, height: 27.9 }, // A4 — standard front
+    xl: { x: 36.05, y: 28, width: 27.9, height: 39.5 }, // A3 — large front
   };
   const zone = printZones[scale] || printZones.lg;
 
   return (
     <div className="format-photo-wrap">
-      <img src="/mockups/spreadshirt/tshirt/tshirt-white-front.png" alt={`Белая футболка с зоной печати ${size}`} className="format-photo-img" />
+      <img src="/product-shirt.png" alt={`Белая футболка с зоной печати ${size}`} className="format-photo-img" />
       <svg className="format-photo-svg" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
         <rect
           x={zone.x}
@@ -239,8 +196,8 @@ export default function Home() {
           <h1>Печать принтов<br/>и логотипов на одежде</h1>
           <p>«Принтопус» — печатаем на всём, до чего тянутся щупальца! Создаём брендовый мерч, корпоративную форму и уникальные принты от 1 штуки. DTF, шелкография и вышивка с гарантией 50+ стирок.</p>
           <div className="lp-hero-actions">
-            <a className="button" href="/configurator">Рассчитать заказ</a>
-            <a className="button outline" href="https://t.me/printservice_by" target="_blank" rel="noopener noreferrer">Написать в Telegram</a>
+            <a className="button" href="#prices">Рассчитать стоимость</a>
+            <a className="button outline" href="/configurator">Конструктор онлайн</a>
           </div>
         </div>
         <div className="lp-hero-media" role="img" aria-label="Печатный центр с современным оборудованием" />
@@ -267,14 +224,6 @@ export default function Home() {
               <div>
                 <h3>{p.title}</h3>
                 <p>{p.copy}</p>
-                <div className="lp-product-variants" aria-label={`Основные цвета: ${p.variants.map((v) => v.name).join(", ")}`}>
-                  {p.variants.map((variant) => (
-                    <span className="product-variant-thumb" key={variant.name}>
-                      <img src={variant.image} alt="" loading="lazy" />
-                      <small>{variant.name}</small>
-                    </span>
-                  ))}
-                </div>
               </div>
               <img className="product-photo" src={p.image} alt={p.title}/>
             </a>
