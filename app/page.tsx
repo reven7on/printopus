@@ -24,10 +24,62 @@ function Icon({ name }: { name: string }) {
 }
 
 const products = [
-  { title: "Футболки и поло", copy: "100% плотный хлопок (180–240 г/м²). Премиум посадка, не садится после стирки.", image: "/product-shirt.png", kind: "shirt" },
-  { title: "Толстовки и худи", copy: "Утеплённый футер с начёсом (320–380 г/м²). Оверсайз крои и стойкая вышивка.", image: "/product-hoodie.png", kind: "hoodie" },
-  { title: "Головные уборы", copy: "6-панельные бейсболки и шапки. Объёмная 3D-вышивка и аккуратные шевроны.", image: "/product-cap.png", kind: "cap" },
-  { title: "Шоперы и сумки", copy: "Хлопковый канвас 280 г/м². Нагрузка до 15 кг, стойкая шелкография.", image: "/product-shopper.png", kind: "bag" },
+  {
+    title: "Футболки и поло",
+    copy: "100% плотный хлопок (180–240 г/м²). Премиум посадка, не садится после стирки.",
+    image: "/product-shirt.png",
+    kind: "shirt",
+    variants: [
+      { name: "Белый", image: "/mockups/spreadshirt/shirt-white-front.png" },
+      { name: "Чёрный", image: "/mockups/spreadshirt/shirt-black-front.png" },
+      { name: "Серый", image: "/mockups/spreadshirt/shirt-grey-front.png" },
+      { name: "Navy", image: "/mockups/spreadshirt/shirt-navy-front.png" },
+      { name: "Красный", image: "/mockups/spreadshirt/shirt-red-front.png" },
+      { name: "Khaki", image: "/mockups/spreadshirt/shirt-khaki-front.png" },
+    ],
+  },
+  {
+    title: "Толстовки и худи",
+    copy: "Утеплённый футер с начёсом (320–380 г/м²). Оверсайз крои и стойкая вышивка.",
+    image: "/mockups/spreadshirt/hoodie/hoodie-gray-front.png",
+    kind: "hoodie",
+    variants: [
+      { name: "Белый", image: "/mockups/spreadshirt/hoodie/hoodie-white-front.png" },
+      { name: "Чёрный", image: "/mockups/spreadshirt/hoodie/hoodie-black-front.png" },
+      { name: "Серый", image: "/mockups/spreadshirt/hoodie/hoodie-gray-front.png" },
+      { name: "Navy", image: "/mockups/spreadshirt/hoodie/hoodie-navy-front.png" },
+      { name: "Красный", image: "/mockups/spreadshirt/hoodie/hoodie-red-front.png" },
+      { name: "Бордо", image: "/mockups/spreadshirt/hoodie/hoodie-burgundy-front.png" },
+    ],
+  },
+  {
+    title: "Головные уборы",
+    copy: "6-панельные бейсболки и snapback. Объёмная 3D-вышивка и аккуратные шевроны.",
+    image: "/mockups/spreadshirt/cap/cap-black-front.png",
+    kind: "cap",
+    variants: [
+      { name: "Белый", image: "/mockups/spreadshirt/cap/cap-white-front.png" },
+      { name: "Чёрный", image: "/mockups/spreadshirt/cap/cap-black-front.png" },
+      { name: "Серый", image: "/mockups/spreadshirt/cap/cap-gray-front.png" },
+      { name: "Navy", image: "/mockups/spreadshirt/cap/cap-navy-front.png" },
+      { name: "Красный", image: "/mockups/spreadshirt/cap/cap-red-front.png" },
+      { name: "Синий", image: "/mockups/spreadshirt/cap/cap-blue-front.png" },
+    ],
+  },
+  {
+    title: "Шоперы и сумки",
+    copy: "Хлопковый канвас 280 г/м². Нагрузка до 15 кг, стойкая шелкография.",
+    image: "/mockups/spreadshirt/tote/tote-natural-front.png",
+    kind: "bag",
+    variants: [
+      { name: "Белый", image: "/mockups/spreadshirt/tote/tote-white-front.png" },
+      { name: "Натур.", image: "/mockups/spreadshirt/tote/tote-natural-front.png" },
+      { name: "Чёрный", image: "/mockups/spreadshirt/tote/tote-black-front.png" },
+      { name: "Navy", image: "/mockups/spreadshirt/tote/tote-navy-front.png" },
+      { name: "Красный", image: "/mockups/spreadshirt/tote/tote-red-front.png" },
+      { name: "Зелёный", image: "/mockups/spreadshirt/tote/tote-green-front.png" },
+    ],
+  },
 ];
 
 const basePrices = [
@@ -196,8 +248,8 @@ export default function Home() {
           <h1>Печать принтов<br/>и логотипов на одежде</h1>
           <p>«Принтопус» — печатаем на всём, до чего тянутся щупальца! Создаём брендовый мерч, корпоративную форму и уникальные принты от 1 штуки. DTF, шелкография и вышивка с гарантией 50+ стирок.</p>
           <div className="lp-hero-actions">
-            <a className="button" href="#prices">Рассчитать стоимость</a>
-            <a className="button outline" href="/configurator">Конструктор онлайн</a>
+            <a className="button" href="/configurator">Рассчитать заказ</a>
+            <a className="button outline" href="https://t.me/printservice_by" target="_blank" rel="noopener noreferrer">Написать в Telegram</a>
           </div>
         </div>
         <div className="lp-hero-media" role="img" aria-label="Печатный центр с современным оборудованием" />
@@ -224,6 +276,14 @@ export default function Home() {
               <div>
                 <h3>{p.title}</h3>
                 <p>{p.copy}</p>
+                <div className="lp-product-variants" aria-label={`Основные цвета: ${p.variants.map((v) => v.name).join(", ")}`}>
+                  {p.variants.map((variant) => (
+                    <span className="product-variant-thumb" key={variant.name}>
+                      <img src={variant.image} alt="" loading="lazy" />
+                      <small>{variant.name}</small>
+                    </span>
+                  ))}
+                </div>
               </div>
               <img className="product-photo" src={p.image} alt={p.title}/>
             </a>

@@ -73,6 +73,44 @@ function ConfigIcon({ name, size = 24 }: { name: string; size?: number }) {
   return <svg className="config-icon" style={{ width: size, height: size }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{shapes[name]}</svg>;
 }
 
+function getMockupPath(itemKey: string, colorKey: string, viewAngleKey: string) {
+  const prodFolder = itemKey === "shirt" ? "tshirt" : itemKey;
+  let viewSlug = "front";
+  if (viewAngleKey === "back") viewSlug = "back";
+  if (viewAngleKey === "sleeve_left") viewSlug = "sleeve-left";
+  if (viewAngleKey === "sleeve_right") viewSlug = "sleeve-right";
+
+  if ((prodFolder === "cap" || prodFolder === "bag") && (viewSlug === "sleeve-left" || viewSlug === "sleeve-right")) {
+    viewSlug = "front";
+  }
+
+  const availColors: Record<string, string[]> = {
+    tshirt: ["white", "black", "khaki", "grey", "red", "navy"],
+    hoodie: ["white", "black", "grey", "navy"],
+    polo: ["white", "black", "navy", "red"],
+    cap: ["white", "black", "navy"],
+    bag: ["white", "black"],
+  };
+
+  const validColors = availColors[prodFolder] || ["white", "black"];
+  const finalColor = validColors.includes(colorKey) ? colorKey : validColors[0];
+
+  return `/mockups/spreadshirt/${prodFolder}/${prodFolder}-${finalColor}-${viewSlug}.png`;
+}
+
+function getAvailableColorsForItem(itemKey: string) {
+  const prodFolder = itemKey === "shirt" ? "tshirt" : itemKey;
+  const availMap: Record<string, string[]> = {
+    tshirt: ["white", "black", "khaki", "grey", "red", "navy"],
+    hoodie: ["white", "black", "grey", "navy"],
+    polo: ["white", "black", "navy", "red"],
+    cap: ["white", "black", "navy"],
+    bag: ["white", "black"],
+  };
+  const validIds = availMap[prodFolder] || ["white", "black"];
+  return garmentColors.filter((c) => validIds.includes(c.id));
+}
+
 export default function Configurator() {
   const [currentStep, setCurrentStep] = useState(1);
   const [item, setItem] = useState("shirt");
@@ -99,11 +137,10 @@ export default function Configurator() {
   const selectedColor = garmentColors.find((c) => c.id === color)!;
   const selectedSize = printSizes.find((s) => s.id === sizeFormat)!;
   const selectedPlacement = placements.find((p) => p.id === placement)!;
+  const activeStep = steps.find((s) => s.n === currentStep)!;
 
-  // Authentic Spreadshirt PNG mockups mapped per color & view
+  // Authentic Spreadshirt PNG mockups mapped per product, color & view
   const currentMockupImage = useMemo(() => {
-    if (item === "hoodie") return "/product-hoodie.png";
-    if (item === "cap") return "/product-cap.png";
     if (item === "bag") return "/product-shopper.png";
 
     const colorKey = garmentColors.some((c) => c.id === color) ? color : "white";
@@ -142,9 +179,9 @@ export default function Configurator() {
 
   function handleSelectPlacement(pId: string) {
     setPlacement(pId);
-    const targetP = placements.find((p) => p.id === pId);
-    if (targetP) {
-      setViewAngle(targetP.view as "front" | "back" | "sleeve_left" | "sleeve_right");
+    const targetPlacement = placements.find((p) => p.id === pId);
+    if (targetPlacement) {
+      setViewAngle(targetPlacement.view as "front" | "back" | "sleeve_left" | "sleeve_right");
     }
   }
 
@@ -155,15 +192,6 @@ export default function Configurator() {
     setOrderId(randomId);
     setSubmitted(true);
   }
-
-  const getViewTitle = (angle: string) => {
-    switch (angle) {
-      case "back": return "Сзади";
-      case "sleeve_left": return "Левый рукав";
-      case "sleeve_right": return "Правый рукав";
-      default: return "Спереди";
-    }
-  };
 
   function handleSelectViewAngle(angle: "front" | "back" | "sleeve_left" | "sleeve_right") {
     setViewAngle(angle);
@@ -196,6 +224,16 @@ export default function Configurator() {
 
       {/* Stepper Header Bar */}
       <div className="config-stepper-wrapper">
+        <div className="mobile-step-status" aria-label={`Шаг ${currentStep} из ${steps.length}: ${activeStep.title}`}>
+          <div className="mobile-step-status-copy">
+            <span>Шаг {currentStep} из {steps.length}</span>
+            <b>{activeStep.title}</b>
+            <small>{activeStep.note}</small>
+          </div>
+          <div className="mobile-step-progress" aria-hidden="true">
+            <span style={{ width: `${(currentStep / steps.length) * 100}%` }} />
+          </div>
+        </div>
         <div className="config-stepper-inner">
           {steps.map((s) => {
             const isCompleted = currentStep > s.n;
@@ -218,7 +256,7 @@ export default function Configurator() {
       </div>
 
       {/* Main Wizard Area */}
-      <div className={`config-wizard-body ${currentStep === 1 ? "catalog-mode" : ""}`}>
+      <div className={`config-wizard-body step-${currentStep} ${currentStep === 1 ? "catalog-mode" : ""}`}>
         {/* Left Column: Authentic Spreadshirt Visual Canvas */}
         {currentStep >= 2 && (
         <div className="config-preview-panel">
@@ -246,18 +284,17 @@ export default function Configurator() {
               )}
             </div>
 
-            {/* 4 Camera Angle View Selector Thumbnails (Spreadshirt Style) */}
+            {/* Camera Angle View Selector Thumbnails (Spreadshirt Style) */}
             <div className="view-angle-thumbnails">
               {[
                 { id: "front", label: "Спереди", slug: "front" },
                 { id: "back", label: "Сзади", slug: "back" },
-                { id: "sleeve_right", label: "Пр. рукав", slug: "sleeve-right" },
-                { id: "sleeve_left", label: "Лев. рукав", slug: "sleeve-left" },
+                ...((item === "cap" || item === "bag") ? [] : [
+                  { id: "sleeve_right", label: "Пр. рукав", slug: "sleeve-right" },
+                  { id: "sleeve_left", label: "Лев. рукав", slug: "sleeve-left" },
+                ]),
               ].map((v) => {
-                const colorKey = garmentColors.some((c) => c.id === color) ? color : "white";
-                const thumbSrc = (item === "shirt" || item === "tshirt")
-                  ? `/mockups/spreadshirt/shirt-${colorKey}-${v.slug}.png`
-                  : currentMockupImage;
+                const thumbSrc = getMockupPath(item, color, v.id);
                 const isActive = viewAngle === v.id;
                 return (
                   <button
@@ -345,7 +382,7 @@ export default function Configurator() {
               <div className="section-block">
                 <h3>Цвет ткани</h3>
                 <div className="color-swatches-row">
-                  {garmentColors.map((c) => (
+                  {getAvailableColorsForItem(item).map((c) => (
                     <button
                       key={c.id}
                       className={`color-swatch-btn ${color === c.id ? "selected" : ""}`}
@@ -377,6 +414,23 @@ export default function Configurator() {
                 <p>Загрузите логотип или принт и выберите расположение на одежде.</p>
               </div>
 
+              <div className="section-block">
+                <h3>Расположение принта</h3>
+                <div className="placements-grid">
+                  {placements.map((p) => (
+                    <button
+                      key={p.id}
+                      className={`placement-card ${placement === p.id ? "selected" : ""}`}
+                      onClick={() => handleSelectPlacement(p.id)}
+                      type="button"
+                    >
+                      <b>{p.label}</b>
+                      <small>{p.sub}</small>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <div className="upload-dropzone" onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); handleFile(e.dataTransfer.files[0]); }}>
                 <ConfigIcon name="upload" size={40} />
                 {fileName ? (
@@ -394,8 +448,6 @@ export default function Configurator() {
                 )}
                 <input ref={inputRef} type="file" accept=".png,.jpg,.jpeg,.svg,.ai,.eps,.pdf" style={{ display: "none" }} onChange={(e) => handleFile(e.target.files?.[0])} />
               </div>
-
-
 
               <div className="step-actions-row desktop-only">
                 <button className="button outline" onClick={() => setCurrentStep(2)}>
