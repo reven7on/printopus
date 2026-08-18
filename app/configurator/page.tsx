@@ -69,10 +69,28 @@ const garmentColors = [
   { id: "darkgrey", label: "Тёмно-серый", hex: "#4a4b4d", border: "#4a4b4d", add: 2 },
   { id: "navy", label: "Тёмно-синий", hex: "#1a2437", border: "#1a2437", add: 2 },
   { id: "blue", label: "Синий", hex: "#2b49b3", border: "#2b49b3", add: 2 },
-  { id: "red", label: "Красный", hex: "#e94711", border: "#e94711", add: 2 },
+  { id: "red", label: "Красный", hex: "#d71920", border: "#d71920", add: 2 },
   { id: "burgundy", label: "Бордовый", hex: "#750033", border: "#750033", add: 2 },
   { id: "green", label: "Зелёный", hex: "#07462c", border: "#07462c", add: 2 },
   { id: "sand", label: "Песочный", hex: "#ebe4dc", border: "#ebe4dc", add: 2 },
+];
+
+const garmentSizesByItem: Record<ItemId, readonly { id: string; label: string }[]> = {
+  shirt: ["XS", "S", "M", "L", "XL", "2XL", "3XL"].map((size) => ({ id: size, label: size })),
+  hoodie: ["XS", "S", "M", "L", "XL", "2XL", "3XL"].map((size) => ({ id: size, label: size })),
+  polo: ["S", "M", "L", "XL", "2XL", "3XL"].map((size) => ({ id: size, label: size })),
+  cap: [{ id: "universal", label: "Универсальный" }],
+  bag: [{ id: "one-size", label: "Один размер" }],
+};
+
+const garmentSizeGuide = [
+  { size: "XS", chest: "82–88", height: "158–168" },
+  { size: "S", chest: "88–94", height: "164–174" },
+  { size: "M", chest: "94–100", height: "170–180" },
+  { size: "L", chest: "100–106", height: "176–186" },
+  { size: "XL", chest: "106–114", height: "180–190" },
+  { size: "2XL", chest: "114–122", height: "184–194" },
+  { size: "3XL", chest: "122–130", height: "184–198" },
 ];
 
 const methods = {
@@ -191,7 +209,7 @@ function getPlacementCopy(itemKey: ItemId, placementOption: (typeof placements)[
 
 const steps = [
   { n: 1, title: "Изделие", note: "Тип одежды", icon: "shirt" },
-  { n: 2, title: "Цвет", note: "Цвет и ракурс", icon: "target" },
+  { n: 2, title: "Параметры", note: "Цвет и размер", icon: "target" },
   { n: 3, title: "Макет", note: "Логотип и позиция", icon: "upload" },
   { n: 4, title: "Тираж", note: "Метод и количество", icon: "layers" },
   { n: 5, title: "Заказ", note: "Сводка и отправка", icon: "clipboard" },
@@ -223,6 +241,8 @@ function ConfigIcon({ name, size = 24 }: { name: string; size?: number }) {
     check: <path d="m5 12 4 4L19 6"/>,
     arrowRight: <path d="M5 12h14m-5-5 5 5-5 5"/>,
     arrowLeft: <path d="M19 12H5m5-5-5 5 5 5"/>,
+    chevronRight: <path d="m9 5 7 7-7 7"/>,
+    chevronLeft: <path d="m15 5-7 7 7 7"/>,
     phone: <path d="M6 3h4l2 5-3 2c2 4 4 6 8 8l2-3 4 2v4c-1 2-4 2-6 1C9 19 4 14 2 7 1 5 3 3 6 3Z"/>,
   };
   return <svg className="config-icon" style={{ width: size, height: size }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{shapes[name]}</svg>;
@@ -270,6 +290,7 @@ export default function Configurator() {
   const [currentStep, setCurrentStep] = useState(1);
   const [item, setItem] = useState<ItemId>("shirt");
   const [color, setColor] = useState("khaki");
+  const [garmentSize, setGarmentSize] = useState("M");
   const [viewAngle, setViewAngle] = useState<ViewAngle>("front");
   const [method, setMethod] = useState<keyof typeof methods>("dtf");
   const [placement, setPlacement] = useState<PlacementId>("center");
@@ -284,6 +305,7 @@ export default function Configurator() {
   const [textColor, setTextColor] = useState("#111111");
   const [textFont, setTextFont] = useState("Arial, sans-serif");
   const [textBold, setTextBold] = useState(true);
+  const [mobileDesignPanelOpen, setMobileDesignPanelOpen] = useState(false);
   const [historyAvailability, setHistoryAvailability] = useState({ undo: 0, redo: 0 });
 
   const [customerName, setCustomerName] = useState("");
@@ -299,15 +321,29 @@ export default function Configurator() {
 
   const selectedItem = items.find((i) => i.id === item)!;
   const selectedColor = garmentColors.find((c) => c.id === color)!;
+  const availableGarmentSizes = garmentSizesByItem[item];
+  const selectedGarmentSize = availableGarmentSizes.find((size) => size.id === garmentSize) ?? availableGarmentSizes[0];
   const selectedSize = printSizes.find((s) => s.id === sizeFormat)!;
   const selectedPlacement = placements.find((p) => p.id === placement)!;
   const activeStep = steps.find((s) => s.n === currentStep)!;
   const availablePlacements = getAvailablePlacementsForItem(item);
   const selectedPlacementCopy = getPlacementCopy(item, selectedPlacement);
   const currentPrintZone = getPrintZone(item, viewAngle);
+  const availableViews = [
+    { id: "front" as const, label: "Спереди" },
+    { id: "back" as const, label: "Сзади" },
+    ...(item === "bag" ? [] : [
+      { id: "sleeve_right" as const, label: item === "cap" ? "Правый ракурс" : "Правый рукав" },
+      { id: "sleeve_left" as const, label: item === "cap" ? "Левый ракурс" : "Левый рукав" },
+    ]),
+  ];
+  const editorViews = availableViews.filter((view) => Boolean(getPrintZone(item, view.id)));
   const currentElements = designs[viewAngle];
   const selectedElement = currentElements.find((element) => element.id === selectedElementId) ?? null;
   const hasArtwork = currentElements.length > 0;
+  const compactPrintZone = currentPrintZone
+    ? currentPrintZone.width / currentPrintZone.canvas < 0.2 || currentPrintZone.height / currentPrintZone.canvas < 0.2
+    : false;
   const designElementsCount = Object.values(designs).reduce((total, elements) => total + elements.length, 0);
 
   // Authentic Spreadshirt PNG mockups mapped per product, color & view
@@ -356,15 +392,23 @@ export default function Configurator() {
     const allowedExtensions = ["png", "jpg", "jpeg", "webp", "svg"];
     if (!extension || !allowedExtensions.includes(extension)) {
       setFileError("Поддерживаются PNG, JPG, WebP и SVG.");
+      setActiveDesignerTool("image");
+      setMobileDesignPanelOpen(true);
       return;
     }
     if (file.size > 20 * 1024 * 1024) {
       setFileError("Файл больше 20 МБ. Уменьшите его и загрузите снова.");
+      setActiveDesignerTool("image");
+      setMobileDesignPanelOpen(true);
       return;
     }
 
     const reader = new FileReader();
-    reader.onerror = () => setFileError("Не удалось прочитать файл. Попробуйте другой.");
+    reader.onerror = () => {
+      setFileError("Не удалось прочитать файл. Попробуйте другой.");
+      setActiveDesignerTool("image");
+      setMobileDesignPanelOpen(true);
+    };
     reader.onload = () => {
       const source = String(reader.result);
       if (extension === "svg") {
@@ -377,7 +421,11 @@ export default function Configurator() {
         const quality: DesignElement["quality"] = shortestSide >= 1200 ? "good" : shortestSide >= 700 ? "medium" : "low";
         addImageElement(source, file, quality);
       };
-      image.onerror = () => setFileError("Изображение повреждено или не поддерживается.");
+      image.onerror = () => {
+        setFileError("Изображение повреждено или не поддерживается.");
+        setActiveDesignerTool("image");
+        setMobileDesignPanelOpen(true);
+      };
       image.src = source;
     };
     reader.readAsDataURL(file);
@@ -588,8 +636,22 @@ export default function Configurator() {
     }
   }
 
+  function cycleViewAngle(direction: -1 | 1) {
+    const currentIndex = availableViews.findIndex((view) => view.id === viewAngle);
+    const nextIndex = (currentIndex + direction + availableViews.length) % availableViews.length;
+    handleSelectViewAngle(availableViews[nextIndex].id);
+  }
+
+  function advanceStep() {
+    if (currentStep === 2 && !getPrintZone(item, viewAngle)) {
+      handleSelectViewAngle("front");
+    }
+    setMobileDesignPanelOpen(false);
+    setCurrentStep((step) => Math.min(5, step + 1));
+  }
+
   return (
-    <main className="config-wizard-page">
+    <main className={`config-wizard-page current-step-${currentStep}`}>
       {/* Header */}
       <header className="config-nav-header">
         <div className="config-header-container">
@@ -607,47 +669,27 @@ export default function Configurator() {
         </div>
       </header>
 
-      {/* Stepper Header Bar */}
       <div className="config-stepper-wrapper">
-        <div className="mobile-step-status" aria-label={`Шаг ${currentStep} из ${steps.length}: ${activeStep.title}`}>
-          <div className="mobile-step-status-copy">
-            <span>Шаг {currentStep} из {steps.length}</span>
-            <b>{activeStep.title}</b>
-            <small>{activeStep.note}</small>
-          </div>
-          <div className="mobile-step-progress" aria-hidden="true">
-            <span style={{ width: `${(currentStep / steps.length) * 100}%` }} />
-          </div>
-        </div>
-        <div className="config-stepper-inner">
-          {steps.map((s) => {
-            const isCompleted = currentStep > s.n;
-            const isActive = currentStep === s.n;
-            return (
-              <button
-                key={s.n}
-                className={`step-tab ${isActive ? "active" : ""} ${isCompleted ? "completed" : ""}`}
-                onClick={() => setCurrentStep(s.n)}
-              >
-                <span className="step-num">{isCompleted ? <ConfigIcon name="check" size={14}/> : s.n}</span>
-                <span className="step-label">
-                  <b>{s.title}</b>
-                  <small>{s.note}</small>
-                </span>
-              </button>
-            );
-          })}
+        <div
+          className="config-progress-track"
+          role="progressbar"
+          aria-label={`${activeStep.title}: ${activeStep.note}`}
+          aria-valuemin={1}
+          aria-valuemax={steps.length}
+          aria-valuenow={currentStep}
+        >
+          <span style={{ width: `${(currentStep / steps.length) * 100}%` }} />
         </div>
       </div>
 
       {/* Main Wizard Area */}
-      <div className={`config-wizard-body step-${currentStep} ${currentStep === 1 ? "catalog-mode" : ""}`}>
+      <div className={`config-wizard-body step-${currentStep} ${currentStep === 1 ? "catalog-mode" : ""} ${currentStep === 3 && mobileDesignPanelOpen ? "mobile-tools-open" : ""}`}>
         {/* Left Column: Authentic Spreadshirt Visual Canvas */}
         {currentStep >= 2 && (
         <div className="config-preview-panel">
           <div className="stage-card">
             <div className="stage-header">
-              <span className="stage-badge">{selectedItem.label} · {selectedColor.label}</span>
+              <span className="stage-badge">{selectedItem.label} · {selectedColor.label} · {selectedGarmentSize.label}</span>
               {currentStep === 3 && (
                 <div className="design-history-actions" aria-label="История изменений макета">
                   <button type="button" onClick={undoDesignChange} disabled={!historyAvailability.undo} aria-label="Отменить" title="Отменить">
@@ -659,6 +701,23 @@ export default function Configurator() {
                 </div>
               )}
             </div>
+
+            {currentStep >= 3 && (
+              <div className="designer-view-tabs" role="tablist" aria-label="Область нанесения">
+                {editorViews.map((view) => (
+                  <button
+                    key={view.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={viewAngle === view.id}
+                    className={viewAngle === view.id ? "active" : ""}
+                    onClick={() => handleSelectViewAngle(view.id)}
+                  >
+                    {view.label}
+                  </button>
+                ))}
+              </div>
+            )}
 
             {/* Authentic Spreadshirt Garment Canvas */}
             <div className="garment-stage">
@@ -676,7 +735,26 @@ export default function Configurator() {
                       if (event.target === event.currentTarget) setSelectedElementId(null);
                     }}
                   >
-                    {!hasArtwork && currentPrintZone.width / currentPrintZone.canvas >= 0.18 && (
+                    {!hasArtwork && currentStep === 3 && (
+                      <button
+                        type="button"
+                        className={`canvas-upload-trigger ${compactPrintZone ? "compact" : ""}`}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        onClick={() => inputRef.current?.click()}
+                        onDragOver={(event) => event.preventDefault()}
+                        onDrop={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          handleFile(event.dataTransfer.files[0]);
+                        }}
+                        aria-label="Загрузить изображение"
+                        title="Загрузить изображение"
+                      >
+                        <ConfigIcon name="upload" size={compactPrintZone ? 17 : 22}/>
+                        <span>Загрузить макет</span>
+                      </button>
+                    )}
+                    {!hasArtwork && currentStep !== 3 && currentPrintZone.width / currentPrintZone.canvas >= 0.18 && (
                       <span className="print-zone-label">
                         {currentPrintZone.width / currentPrintZone.canvas < 0.25 ? "Принт" : "Зона печати"}
                       </span>
@@ -724,34 +802,16 @@ export default function Configurator() {
                   <div className="print-zone-unavailable">На этом ракурсе нанесение недоступно</div>
                 )}
               </div>
-            </div>
-
-            {/* Camera Angle View Selector Thumbnails (Spreadshirt Style) */}
-            <div className="view-angle-thumbnails">
-              {[
-                { id: "front", label: "Спереди", slug: "front" },
-                { id: "back", label: "Сзади", slug: "back" },
-                ...(item === "bag" ? [] : [
-                  { id: "sleeve_right", label: item === "cap" ? "Пр. ракурс" : "Пр. рукав", slug: "sleeve-right" },
-                  { id: "sleeve_left", label: item === "cap" ? "Лев. ракурс" : "Лев. рукав", slug: "sleeve-left" },
-                ]),
-              ].map((v) => {
-                const thumbSrc = getMockupPath(item, color, v.id as ViewAngle);
-                const isActive = viewAngle === v.id;
-                return (
-                  <button
-                    key={v.id}
-                    className={`view-thumb-btn ${isActive ? "active" : ""}`}
-                    onClick={() => handleSelectViewAngle(v.id as ViewAngle)}
-                    type="button"
-                  >
-                    <div className="thumb-box">
-                      <img src={thumbSrc} alt={v.label} />
-                    </div>
-                    <span className="thumb-label">{v.label}</span>
+              {currentStep === 2 && (
+                <div className="stage-view-navigation" aria-label="Ракурс изделия">
+                  <button type="button" onClick={() => cycleViewAngle(-1)} aria-label="Предыдущий ракурс">
+                    <ConfigIcon name="chevronLeft" size={22}/>
                   </button>
-                );
-              })}
+                  <button type="button" onClick={() => cycleViewAngle(1)} aria-label="Следующий ракурс">
+                    <ConfigIcon name="chevronRight" size={22}/>
+                  </button>
+                </div>
+              )}
             </div>
 
             {currentStep === 3 && selectedElement && (
@@ -783,7 +843,7 @@ export default function Configurator() {
           {currentStep === 1 && (
             <div className="step-pane animate-fade">
               <div className="step-pane-header">
-                <h2>1. Выберите изделие</h2>
+                <h2>Выберите изделие</h2>
                 <p>Базовые модели премиум качества с идеальной посадкой по фигуре.</p>
               </div>
 
@@ -794,6 +854,8 @@ export default function Configurator() {
                     className={`product-tile catalog-card ${item === i.id ? "selected" : ""}`}
                     onClick={() => {
                       setItem(i.id);
+                      const nextSizes = garmentSizesByItem[i.id];
+                      setGarmentSize(nextSizes.find((size) => size.id === "M")?.id ?? nextSizes[0].id);
                       const availColors = getAvailableColorsForItem(i.id);
                       if (!availColors.some((c) => c.id === color)) {
                         setColor(availColors[0].id);
@@ -826,34 +888,91 @@ export default function Configurator() {
 
           {/* STEP 2: COLOR */}
           {currentStep === 2 && (
-            <div className="step-pane animate-fade">
-              <div className="step-pane-header">
-                <h2>2. Цвет изделия</h2>
-                <p>Выберите цвет и проверьте посадку с разных ракурсов.</p>
+            <div className="step-pane product-options-pane animate-fade">
+              <div className="step-pane-header product-options-header">
+                <span className="product-options-kicker">{selectedItem.label}</span>
+                <h2>Цвет и размер</h2>
+                <p>Выберите вариант изделия. Макет можно будет добавить на следующем экране.</p>
               </div>
 
-              <div className="section-block">
-                <h3>Цвет ткани</h3>
-                <div className="color-swatches-row">
+              <section className="product-option-section">
+                <div className="product-option-heading">
+                  <div>
+                    <h3>Цвет</h3>
+                    <p>{selectedColor.label}</p>
+                  </div>
+                  <span className="selected-color-preview" style={{ backgroundColor: selectedColor.hex, borderColor: selectedColor.border }} aria-hidden="true" />
+                </div>
+                <div className="product-color-grid">
                   {getAvailableColorsForItem(item).map((c) => (
                     <button
                       key={c.id}
-                      className={`color-swatch-btn ${color === c.id ? "selected" : ""}`}
+                      className={`product-color-option ${color === c.id ? "selected" : ""}`}
                       onClick={() => setColor(c.id)}
+                      type="button"
+                      aria-pressed={color === c.id}
+                      aria-label={c.label}
                     >
-                      <span className="swatch-circle" style={{ backgroundColor: c.hex, borderColor: c.border }} />
-                      <span className="swatch-name">{c.label}</span>
+                      <span className="product-color-swatch" style={{ backgroundColor: c.hex, borderColor: c.border }}>
+                        {color === c.id && <ConfigIcon name="check" size={15}/>}
+                      </span>
+                      <span>{c.label}</span>
                     </button>
                   ))}
                 </div>
-              </div>
+              </section>
+
+              <section className="product-option-section size-option-section">
+                <div className="product-option-heading">
+                  <div>
+                    <h3>Размер</h3>
+                    <p>{selectedGarmentSize.label}</p>
+                  </div>
+                  {(item === "shirt" || item === "hoodie" || item === "polo") && (
+                    <span className="fit-note">Унисекс · стандартная посадка</span>
+                  )}
+                </div>
+
+                <div className={`garment-size-grid ${availableGarmentSizes.length === 1 ? "single-size" : ""}`}>
+                  {availableGarmentSizes.map((size) => (
+                    <button
+                      key={size.id}
+                      type="button"
+                      className={garmentSize === size.id ? "selected" : ""}
+                      onClick={() => setGarmentSize(size.id)}
+                      aria-pressed={garmentSize === size.id}
+                    >
+                      {size.label}
+                    </button>
+                  ))}
+                </div>
+
+                {(item === "shirt" || item === "hoodie" || item === "polo") && (
+                  <details className="size-guide-details">
+                    <summary>Как выбрать размер</summary>
+                    <div className="size-guide-table-wrap">
+                      <table className="size-guide-table">
+                        <thead><tr><th>Размер</th><th>Обхват груди, см</th><th>Рост, см</th></tr></thead>
+                        <tbody>
+                          {garmentSizeGuide
+                            .filter((row) => availableGarmentSizes.some((size) => size.id === row.size))
+                            .map((row) => (
+                              <tr key={row.size}><td>{row.size}</td><td>{row.chest}</td><td>{row.height}</td></tr>
+                            ))}
+                        </tbody>
+                      </table>
+                      <p className="size-guide-note">Ориентировочные значения. Точные замеры зависят от выбранной модели.</p>
+                    </div>
+                  </details>
+                )}
+              </section>
 
               <div className="step-actions-row desktop-only mt-6">
                 <button className="button outline" onClick={() => setCurrentStep(1)}>
                   <ConfigIcon name="arrowLeft" size={18}/> Назад
                 </button>
-                <button className="button button-primary" onClick={() => setCurrentStep(3)}>
-                  Далее: Загрузка макета <ConfigIcon name="arrowRight" size={18}/>
+                <button className="button button-primary" onClick={advanceStep}>
+                  Далее: Создать макет <ConfigIcon name="arrowRight" size={18}/>
                 </button>
               </div>
             </div>
@@ -863,9 +982,20 @@ export default function Configurator() {
           {currentStep === 3 && (
             <div className="step-pane designer-pane animate-fade">
               <div className="step-pane-header">
-                <h2>3. Создайте макет</h2>
+                <h2>Создайте макет</h2>
                 <p>Добавьте изображение или текст. Перемещайте выбранный элемент прямо на товаре.</p>
               </div>
+
+              <input
+                ref={inputRef}
+                type="file"
+                accept=".png,.jpg,.jpeg,.webp,.svg"
+                hidden
+                onChange={(event) => {
+                  handleFile(event.target.files?.[0]);
+                  event.currentTarget.value = "";
+                }}
+              />
 
               <div className="designer-tool-tabs" role="tablist" aria-label="Инструменты конструктора">
                 {[
@@ -916,16 +1046,6 @@ export default function Configurator() {
                         </span>
                       </div>
                     )}
-                    <input
-                      ref={inputRef}
-                      type="file"
-                      accept=".png,.jpg,.jpeg,.webp,.svg"
-                      hidden
-                      onChange={(event) => {
-                        handleFile(event.target.files?.[0]);
-                        event.currentTarget.value = "";
-                      }}
-                    />
                   </div>
                 )}
 
@@ -1016,7 +1136,7 @@ export default function Configurator() {
           {currentStep === 4 && (
             <div className="step-pane animate-fade">
               <div className="step-pane-header">
-                <h2>4. Метод нанесения, размер и тираж</h2>
+                <h2>Тираж и параметры печати</h2>
                 <p>Чем больше тираж — тем меньше цена за единицу изделия!</p>
               </div>
 
@@ -1099,14 +1219,14 @@ export default function Configurator() {
               {!submitted ? (
                 <>
                   <div className="step-pane-header">
-                    <h2>5. Сводка заказа и контакты</h2>
+                    <h2>Проверьте заказ и оставьте контакты</h2>
                     <p>Проверьте детали и укажите номер телефона для подтверждения расчёта.</p>
                   </div>
 
                   <div className="order-summary-card">
                     <h3>Детали вашего заказа</h3>
                     <div className="summary-list">
-                      <div className="summary-row"><span>Изделие:</span><b>{selectedItem.label} ({selectedColor.label})</b></div>
+                      <div className="summary-row"><span>Изделие:</span><b>{selectedItem.label} · {selectedColor.label} · {selectedGarmentSize.label}</b></div>
                       <div className="summary-row"><span>Печать:</span><b>{methods[method].label} ({selectedSize.label})</b></div>
                       <div className="summary-row"><span>Расположение:</span><b>{selectedPlacementCopy.label}</b></div>
                       <div className="summary-row"><span>Макет:</span><b>{designElementsCount ? `${designElementsCount} элем.` : "Не добавлен"}</b></div>
@@ -1178,39 +1298,77 @@ export default function Configurator() {
         </div>
       </div>
 
+      {currentStep === 3 && mobileDesignPanelOpen && (
+        <button
+          type="button"
+          className="mobile-designer-backdrop"
+          onClick={() => setMobileDesignPanelOpen(false)}
+          aria-label="Закрыть инструменты дизайна"
+        />
+      )}
+
       {/* Sticky Mobile Action Footer */}
       {!submitted && (
-        <div className="mobile-config-sticky-footer">
-          <div className="sticky-price-info">
-            {currentStep <= 3 ? (
-              <>
-                <small>Цена изделия</small>
+        <div className={`mobile-config-sticky-footer ${currentStep === 3 ? "designer-mobile-footer" : ""}`}>
+          {currentStep === 3 ? (
+            <>
+              <div className="designer-mobile-price-row">
+                <span>Предварительная цена</span>
                 <b>от {selectedItem.base + selectedColor.add} BYN</b>
-              </>
-            ) : (
-              <>
-                <small>{qty} шт. × {unitPrice} BYN</small>
-                <b>{totalPrice} BYN</b>
-              </>
-            )}
-          </div>
+              </div>
+              <div className="designer-mobile-navigation">
+                <button type="button" onClick={() => { setMobileDesignPanelOpen(false); setCurrentStep(2); }}>
+                  <ConfigIcon name="shirt" size={22}/>
+                  <span>Товар</span>
+                </button>
+                <button
+                  type="button"
+                  className={mobileDesignPanelOpen ? "active" : ""}
+                  onClick={() => setMobileDesignPanelOpen((open) => !open)}
+                  aria-expanded={mobileDesignPanelOpen}
+                >
+                  <ConfigIcon name="layers" size={22}/>
+                  <span>Дизайн</span>
+                </button>
+                <button type="button" className="designer-mobile-next" onClick={() => { setMobileDesignPanelOpen(false); setCurrentStep(4); }} aria-label="Перейти к тиражу">
+                  <ConfigIcon name="arrowRight" size={24}/>
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="sticky-price-info">
+                {currentStep <= 3 ? (
+                  <>
+                    <small>Цена изделия</small>
+                    <b>от {selectedItem.base + selectedColor.add} BYN</b>
+                  </>
+                ) : (
+                  <>
+                    <small>{qty} шт. × {unitPrice} BYN</small>
+                    <b>{totalPrice} BYN</b>
+                  </>
+                )}
+              </div>
 
-          <div className="sticky-buttons-group">
-            {currentStep > 1 && (
-              <button className="button outline button-small" onClick={() => setCurrentStep((s) => s - 1)}>
-                <ConfigIcon name="arrowLeft" size={16}/>
-              </button>
-            )}
-            {currentStep < 5 ? (
-              <button className="button button-primary button-small" onClick={() => setCurrentStep((s) => s + 1)}>
-                Далее ({currentStep}/5) <ConfigIcon name="arrowRight" size={16}/>
-              </button>
-            ) : (
-              <button className="button button-primary button-small" onClick={(e) => handleSubmitOrder(e)}>
-                Отправить <ConfigIcon name="arrowRight" size={16}/>
-              </button>
-            )}
-          </div>
+              <div className="sticky-buttons-group">
+                {currentStep > 1 && (
+                  <button className="button outline button-small" onClick={() => setCurrentStep((s) => s - 1)}>
+                    <ConfigIcon name="arrowLeft" size={16}/>
+                  </button>
+                )}
+                {currentStep < 5 ? (
+                  <button className="button button-primary button-small" onClick={advanceStep}>
+                    Далее <ConfigIcon name="arrowRight" size={16}/>
+                  </button>
+                ) : (
+                  <button className="button button-primary button-small" onClick={(e) => handleSubmitOrder(e)}>
+                    Отправить <ConfigIcon name="arrowRight" size={16}/>
+                  </button>
+                )}
+              </div>
+            </>
+          )}
         </div>
       )}
     </main>
