@@ -800,6 +800,7 @@ footer{background:#141517;color:#fff;padding:55px 6vw;display:grid;grid-template
 .canvas-print-zone.is-editable:not(.has-image):hover {
   border-color: transparent;
   background: transparent;
+  overflow: visible;
 }
 
 .canvas-upload-trigger {
