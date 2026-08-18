@@ -87,7 +87,7 @@ function getMockupPath(itemKey: string, colorKey: string, viewAngleKey: string) 
   const availColors: Record<string, string[]> = {
     tshirt: ["white", "black", "khaki", "grey", "red", "navy"],
     hoodie: ["white", "black", "grey", "navy"],
-    polo: ["white", "black", "navy", "red"],
+    polo: ["white", "black", "grey", "navy", "red"],
     cap: ["white", "black", "navy"],
     bag: ["white", "black"],
   };
@@ -103,7 +103,7 @@ function getAvailableColorsForItem(itemKey: string) {
   const availMap: Record<string, string[]> = {
     tshirt: ["white", "black", "khaki", "grey", "red", "navy"],
     hoodie: ["white", "black", "grey", "navy"],
-    polo: ["white", "black", "navy", "red"],
+    polo: ["white", "black", "grey", "navy", "red"],
     cap: ["white", "black", "navy"],
     bag: ["white", "black"],
   };
