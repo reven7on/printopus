@@ -100,17 +100,17 @@ const faqs = [
 function FormatShirtIcon({ scale, size }: { scale: string; size: string }) {
   // Precision print area overlay coordinates on real studio photo /product-shirt.png (viewBox 100x100)
   const printZones: Record<string, { x: number; y: number; width: number; height: number }> = {
-    xs: { x: 32.5,  y: 28, width: 7.0,  height: 9.9 },  // A7 — left chest logo
-    sm: { x: 45.05, y: 28, width: 9.9,  height: 14.0 }, // A6 — small front
-    md: { x: 43.05, y: 28, width: 13.9, height: 19.7 }, // A5 — compact front
-    lg: { x: 40.15, y: 28, width: 19.7, height: 27.9 }, // A4 — standard front
-    xl: { x: 36.05, y: 28, width: 27.9, height: 39.5 }, // A3 — large front
+    xs: { x: 32.5,  y: 19, width: 7.0,  height: 9.9 },  // A7 — left chest logo
+    sm: { x: 45.05, y: 19, width: 9.9,  height: 14.0 }, // A6 — small front
+    md: { x: 43.05, y: 19, width: 13.9, height: 19.7 }, // A5 — compact front
+    lg: { x: 40.15, y: 19, width: 19.7, height: 27.9 }, // A4 — standard front
+    xl: { x: 36.05, y: 19, width: 27.9, height: 39.5 }, // A3 — large front
   };
   const zone = printZones[scale] || printZones.lg;
 
   return (
     <div className="format-photo-wrap">
-      <img src="/product-shirt.png" alt={`Белая футболка с зоной печати ${size}`} className="format-photo-img" />
+      <img src="/mockups/spreadshirt/tshirt/tshirt-white-front.png" alt={`Белая футболка с зоной печати ${size}`} className="format-photo-img" />
       <svg className="format-photo-svg" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
         <rect
           x={zone.x}
