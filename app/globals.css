@@ -613,7 +613,7 @@ footer{background:#141517;color:#fff;padding:55px 6vw;display:grid;grid-template
 
 .garment-canvas-frame {
   position: relative;
-  width: 100%;
+  height: 100%;
   max-width: 100%;
   aspect-ratio: 1 / 1;
   flex: none;
@@ -1945,6 +1945,11 @@ footer{background:#141517;color:#fff;padding:55px 6vw;display:grid;grid-template
     max-height: none;
     aspect-ratio: auto;
     border-radius: 0;
+  }
+
+  .config-wizard-body.step-3 .garment-canvas-frame {
+    width: 100%;
+    height: auto;
   }
 
   .config-wizard-body.step-3 .stage-header {
