@@ -14,11 +14,17 @@ const items = [
 
 const garmentColors = [
   { id: "white", label: "Белый", hex: "#ffffff", border: "#e5e7eb", add: 0 },
+  { id: "natural", label: "Натуральный", hex: "#f7ebcd", border: "#e5e7eb", add: 0 },
   { id: "black", label: "Чёрный", hex: "#1a1a1a", border: "#1a1a1a", add: 2 },
   { id: "khaki", label: "Хаки / Олива", hex: "#786c62", border: "#786c62", add: 2 },
   { id: "grey", label: "Меланж", hex: "#5b5d61", border: "#5b5d61", add: 2 },
-  { id: "red", label: "Красный", hex: "#e94711", border: "#e94711", add: 2 },
+  { id: "darkgrey", label: "Тёмно-серый", hex: "#4a4b4d", border: "#4a4b4d", add: 2 },
   { id: "navy", label: "Тёмно-синий", hex: "#1a2437", border: "#1a2437", add: 2 },
+  { id: "blue", label: "Синий", hex: "#2b49b3", border: "#2b49b3", add: 2 },
+  { id: "red", label: "Красный", hex: "#e94711", border: "#e94711", add: 2 },
+  { id: "burgundy", label: "Бордовый", hex: "#750033", border: "#750033", add: 2 },
+  { id: "green", label: "Зелёный", hex: "#07462c", border: "#07462c", add: 2 },
+  { id: "sand", label: "Песочный", hex: "#ebe4dc", border: "#ebe4dc", add: 2 },
 ];
 
 const methods = {
@@ -80,16 +86,16 @@ function getMockupPath(itemKey: string, colorKey: string, viewAngleKey: string) 
   if (viewAngleKey === "sleeve_left") viewSlug = "sleeve-left";
   if (viewAngleKey === "sleeve_right") viewSlug = "sleeve-right";
 
-  if ((prodFolder === "cap" || prodFolder === "bag") && (viewSlug === "sleeve-left" || viewSlug === "sleeve-right")) {
+  if (prodFolder === "bag" && (viewSlug === "sleeve-left" || viewSlug === "sleeve-right")) {
     viewSlug = "front";
   }
 
   const availColors: Record<string, string[]> = {
-    tshirt: ["white", "black", "khaki", "grey", "red", "navy"],
-    hoodie: ["white", "black", "grey", "navy"],
-    polo: ["white", "black", "grey", "navy", "red"],
-    cap: ["white", "black", "navy"],
-    bag: ["white", "black"],
+    tshirt: ["white", "black", "khaki", "grey", "navy", "red", "burgundy"],
+    hoodie: ["white", "black", "grey", "navy", "red", "burgundy"],
+    polo: ["white", "black", "grey", "navy", "blue", "sand"],
+    cap: ["white", "black", "grey", "darkgrey", "navy", "red", "blue"],
+    bag: ["white", "natural", "black", "navy", "red", "blue", "green", "khaki", "burgundy"],
   };
 
   const validColors = availColors[prodFolder] || ["white", "black"];
@@ -101,11 +107,11 @@ function getMockupPath(itemKey: string, colorKey: string, viewAngleKey: string) 
 function getAvailableColorsForItem(itemKey: string) {
   const prodFolder = itemKey === "shirt" ? "tshirt" : itemKey;
   const availMap: Record<string, string[]> = {
-    tshirt: ["white", "black", "khaki", "grey", "red", "navy"],
-    hoodie: ["white", "black", "grey", "navy"],
-    polo: ["white", "black", "grey", "navy", "red"],
-    cap: ["white", "black", "navy"],
-    bag: ["white", "black"],
+    tshirt: ["white", "black", "khaki", "grey", "navy", "red", "burgundy"],
+    hoodie: ["white", "black", "grey", "navy", "red", "burgundy"],
+    polo: ["white", "black", "grey", "navy", "blue", "sand"],
+    cap: ["white", "black", "grey", "darkgrey", "navy", "red", "blue"],
+    bag: ["white", "natural", "black", "navy", "red", "blue", "green", "khaki", "burgundy"],
   };
   const validIds = availMap[prodFolder] || ["white", "black"];
   return garmentColors.filter((c) => validIds.includes(c.id));
@@ -289,9 +295,9 @@ export default function Configurator() {
               {[
                 { id: "front", label: "Спереди", slug: "front" },
                 { id: "back", label: "Сзади", slug: "back" },
-                ...((item === "cap" || item === "bag") ? [] : [
-                  { id: "sleeve_right", label: "Пр. рукав", slug: "sleeve-right" },
-                  { id: "sleeve_left", label: "Лев. рукав", slug: "sleeve-left" },
+                ...(item === "bag" ? [] : [
+                  { id: "sleeve_right", label: item === "cap" ? "Пр. ракурс" : "Пр. рукав", slug: "sleeve-right" },
+                  { id: "sleeve_left", label: item === "cap" ? "Лев. ракурс" : "Лев. рукав", slug: "sleeve-left" },
                 ]),
               ].map((v) => {
                 const thumbSrc = getMockupPath(item, color, v.id);
