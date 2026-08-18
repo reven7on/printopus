@@ -1714,15 +1714,10 @@ footer{background:#141517;color:#fff;padding:55px 6vw;display:grid;grid-template
     padding-bottom: 126px;
   }
 
-  .config-wizard-page.current-step-3 .config-nav-header {
+  .config-nav-header {
     display: none;
   }
 
-  .config-wizard-page.current-step-3 .config-stepper-wrapper {
-    top: 0;
-  }
-
-  .config-nav-header { height: 56px; }
   .config-header-container { padding: 0 12px; }
   .config-nav-header .brand small { display: none; }
   .config-nav-header .brand b { font-size: 14px; }
@@ -1741,7 +1736,7 @@ footer{background:#141517;color:#fff;padding:55px 6vw;display:grid;grid-template
   }
 
   .config-stepper-wrapper {
-    top: 56px;
+    top: 0;
     padding: 0 10px;
   }
 
