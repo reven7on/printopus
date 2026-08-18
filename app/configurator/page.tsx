@@ -147,15 +147,7 @@ export default function Configurator() {
 
   // Authentic Spreadshirt PNG mockups mapped per product, color & view
   const currentMockupImage = useMemo(() => {
-    if (item === "bag") return "/product-shopper.png";
-
-    const colorKey = garmentColors.some((c) => c.id === color) ? color : "white";
-    let viewSlug = "front";
-    if (viewAngle === "back") viewSlug = "back";
-    if (viewAngle === "sleeve_left") viewSlug = "sleeve-left";
-    if (viewAngle === "sleeve_right") viewSlug = "sleeve-right";
-
-    return `/mockups/spreadshirt/shirt-${colorKey}-${viewSlug}.png`;
+    return getMockupPath(item, color, viewAngle);
   }, [item, color, viewAngle]);
 
   const unitPrice = useMemo(() => {
@@ -357,7 +349,17 @@ export default function Configurator() {
                   <button
                     key={i.id}
                     className={`product-tile catalog-card ${item === i.id ? "selected" : ""}`}
-                    onClick={() => { setItem(i.id); setCurrentStep(2); }}
+                    onClick={() => {
+                      setItem(i.id);
+                      const availColors = getAvailableColorsForItem(i.id);
+                      if (!availColors.some((c) => c.id === color)) {
+                        setColor(availColors[0].id);
+                      }
+                      if (i.id === "bag" && (viewAngle === "sleeve_left" || viewAngle === "sleeve_right")) {
+                        setViewAngle("front");
+                      }
+                      setCurrentStep(2);
+                    }}
                   >
                     <ConfigIcon name={i.icon} size={48} />
                     <div className="tile-info">
