@@ -1713,6 +1713,15 @@ footer{background:#141517;color:#fff;padding:55px 6vw;display:grid;grid-template
   .config-wizard-page.current-step-3 {
     padding-bottom: 126px;
   }
+
+  .config-wizard-page.current-step-3 .config-nav-header {
+    display: none;
+  }
+
+  .config-wizard-page.current-step-3 .config-stepper-wrapper {
+    top: 0;
+  }
+
   .config-nav-header { height: 56px; }
   .config-header-container { padding: 0 12px; }
   .config-nav-header .brand small { display: none; }
