@@ -1,8 +1,20 @@
 "use client";
 
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
+
+type ItemId = "shirt" | "hoodie" | "polo" | "cap" | "bag";
+type ViewAngle = "front" | "back" | "sleeve_left" | "sleeve_right";
+type PlacementId = "center" | "chest_left" | "back" | "sleeve_left" | "sleeve_right";
+
+type PrintZone = {
+  canvas: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
 
 const items = [
   { id: "shirt", label: "Футболка", note: "100% хлопковый трикотаж", base: 15, icon: "shirt" },
@@ -10,7 +22,7 @@ const items = [
   { id: "polo", label: "Поло", note: "Классическое пике 220 г/м²", base: 25, icon: "polo" },
   { id: "cap", label: "Кепка", note: "6-панельная классическая", base: 12, icon: "cap" },
   { id: "bag", label: "Шопер", note: "Плотный натуральный канвас", base: 10, icon: "bag" },
-];
+] as const;
 
 const garmentColors = [
   { id: "white", label: "Белый", hex: "#ffffff", border: "#e5e7eb", add: 0 },
@@ -47,7 +59,81 @@ const placements = [
   { id: "back", label: "На спине", sub: "Крупный спинной принт", view: "back" },
   { id: "sleeve_left", label: "На левом рукаве", sub: "Фокусный ракурс левого рукава", view: "sleeve_left" },
   { id: "sleeve_right", label: "На правом рукаве", sub: "Фокусный ракурс правого рукава", view: "sleeve_right" },
-];
+] as const;
+
+// Coordinates read from Spreadshirt's product viewer. Keeping the original
+// canvas units makes the source geometry auditable while CSS receives percentages.
+const printZones: Record<ItemId, Partial<Record<ViewAngle, PrintZone>>> = {
+  shirt: {
+    front: { canvas: 799.1011235955056, x: 231.169, y: 122.719, width: 331, height: 399 },
+    back: { canvas: 759.8290598290598, x: 219.808, y: 81.4103, width: 314, height: 379 },
+    sleeve_right: { canvas: 317.5, x: 94.1161, y: 149.679, width: 97, height: 109 },
+    sleeve_left: { canvas: 317.5, x: 121.33, y: 149.679, width: 96, height: 109 },
+  },
+  hoodie: {
+    front: { canvas: 833.7631887456038, x: 241.196, y: 196.53, width: 348, height: 297 },
+    back: { canvas: 897.979797979798, x: 272.601, y: 214.874, width: 355, height: 445 },
+    sleeve_right: { canvas: 797.3094170403587, x: 338.857, y: 165.157, width: 93, height: 373 },
+    sleeve_left: { canvas: 797.3094170403587, x: 361.637, y: 165.157, width: 93, height: 373 },
+  },
+  polo: {
+    front: { canvas: 856.9018836097835, x: 254.214, y: 147.101, width: 349, height: 457 },
+    back: { canvas: 855.9393428812131, x: 253.929, y: 109.846, width: 348, height: 457 },
+    sleeve_right: { canvas: 375.50158394931356, x: 120.697, y: 185.069, width: 95, height: 95 },
+    sleeve_left: { canvas: 375.50819268202537, x: 158.965, y: 184.938, width: 95, height: 95 },
+  },
+  cap: {
+    front: { canvas: 309.62124510230734, x: 91.7806, y: 139.33, width: 127, height: 50 },
+    sleeve_right: { canvas: 309.62124510230734, x: 144.859, y: 138.224, width: 65, height: 50 },
+    sleeve_left: { canvas: 309.62124510230734, x: 99.5211, y: 138.224, width: 65, height: 50 },
+  },
+  bag: {
+    front: { canvas: 747.8443743427971, x: 248.391, y: 355.226, width: 251, height: 299 },
+    back: { canvas: 747.8443743427971, x: 248.391, y: 355.226, width: 251, height: 299 },
+  },
+};
+
+const placementIdsByItem: Record<ItemId, readonly PlacementId[]> = {
+  shirt: ["center", "chest_left", "back", "sleeve_left", "sleeve_right"],
+  hoodie: ["center", "chest_left", "back", "sleeve_left", "sleeve_right"],
+  polo: ["center", "chest_left", "back", "sleeve_left", "sleeve_right"],
+  cap: ["center", "sleeve_left", "sleeve_right"],
+  bag: ["center", "back"],
+};
+
+function getPrintZone(itemKey: ItemId, viewAngleKey: ViewAngle) {
+  return printZones[itemKey][viewAngleKey];
+}
+
+function getPrintZoneStyle(zone: PrintZone): CSSProperties {
+  return {
+    left: `${(zone.x / zone.canvas) * 100}%`,
+    top: `${(zone.y / zone.canvas) * 100}%`,
+    width: `${(zone.width / zone.canvas) * 100}%`,
+    height: `${(zone.height / zone.canvas) * 100}%`,
+  };
+}
+
+function getAvailablePlacementsForItem(itemKey: ItemId) {
+  const availableIds = placementIdsByItem[itemKey];
+  return placements.filter((placementOption) => availableIds.includes(placementOption.id));
+}
+
+function getPlacementCopy(itemKey: ItemId, placementOption: (typeof placements)[number]) {
+  if (itemKey === "cap" && placementOption.id === "sleeve_left") {
+    return { label: "Слева", sub: "Боковая зона кепки" };
+  }
+  if (itemKey === "cap" && placementOption.id === "sleeve_right") {
+    return { label: "Справа", sub: "Боковая зона кепки" };
+  }
+  if (itemKey === "bag" && placementOption.id === "center") {
+    return { label: "На лицевой стороне", sub: "Основная зона шопера" };
+  }
+  if (itemKey === "bag" && placementOption.id === "back") {
+    return { label: "На обратной стороне", sub: "Основная зона шопера" };
+  }
+  return { label: placementOption.label, sub: placementOption.sub };
+}
 
 const steps = [
   { n: 1, title: "Изделие", note: "Тип одежды", icon: "shirt" },
@@ -79,7 +165,7 @@ function ConfigIcon({ name, size = 24 }: { name: string; size?: number }) {
   return <svg className="config-icon" style={{ width: size, height: size }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{shapes[name]}</svg>;
 }
 
-function getMockupPath(itemKey: string, colorKey: string, viewAngleKey: string) {
+function getMockupPath(itemKey: ItemId, colorKey: string, viewAngleKey: ViewAngle) {
   const prodFolder = itemKey === "shirt" ? "tshirt" : itemKey;
   let viewSlug = "front";
   if (viewAngleKey === "back") viewSlug = "back";
@@ -104,7 +190,7 @@ function getMockupPath(itemKey: string, colorKey: string, viewAngleKey: string) 
   return `/mockups/spreadshirt/${prodFolder}/${prodFolder}-${finalColor}-${viewSlug}.png`;
 }
 
-function getAvailableColorsForItem(itemKey: string) {
+function getAvailableColorsForItem(itemKey: ItemId) {
   const prodFolder = itemKey === "shirt" ? "tshirt" : itemKey;
   const availMap: Record<string, string[]> = {
     tshirt: ["white", "black", "khaki", "grey", "navy", "red", "burgundy"],
@@ -119,11 +205,11 @@ function getAvailableColorsForItem(itemKey: string) {
 
 export default function Configurator() {
   const [currentStep, setCurrentStep] = useState(1);
-  const [item, setItem] = useState("shirt");
+  const [item, setItem] = useState<ItemId>("shirt");
   const [color, setColor] = useState("khaki");
-  const [viewAngle, setViewAngle] = useState<"front" | "back" | "sleeve_left" | "sleeve_right">("front");
+  const [viewAngle, setViewAngle] = useState<ViewAngle>("front");
   const [method, setMethod] = useState<keyof typeof methods>("dtf");
-  const [placement, setPlacement] = useState("center");
+  const [placement, setPlacement] = useState<PlacementId>("center");
   const [sizeFormat, setSizeFormat] = useState("A4");
   const [qty, setQty] = useState(30);
   
@@ -144,6 +230,9 @@ export default function Configurator() {
   const selectedSize = printSizes.find((s) => s.id === sizeFormat)!;
   const selectedPlacement = placements.find((p) => p.id === placement)!;
   const activeStep = steps.find((s) => s.n === currentStep)!;
+  const availablePlacements = getAvailablePlacementsForItem(item);
+  const selectedPlacementCopy = getPlacementCopy(item, selectedPlacement);
+  const currentPrintZone = getPrintZone(item, viewAngle);
 
   // Authentic Spreadshirt PNG mockups mapped per product, color & view
   const currentMockupImage = useMemo(() => {
@@ -175,11 +264,11 @@ export default function Configurator() {
     setArtRotation(0);
   }
 
-  function handleSelectPlacement(pId: string) {
+  function handleSelectPlacement(pId: PlacementId) {
     setPlacement(pId);
     const targetPlacement = placements.find((p) => p.id === pId);
     if (targetPlacement) {
-      setViewAngle(targetPlacement.view as "front" | "back" | "sleeve_left" | "sleeve_right");
+      setViewAngle(targetPlacement.view as ViewAngle);
     }
   }
 
@@ -191,11 +280,11 @@ export default function Configurator() {
     setSubmitted(true);
   }
 
-  function handleSelectViewAngle(angle: "front" | "back" | "sleeve_left" | "sleeve_right") {
+  function handleSelectViewAngle(angle: ViewAngle) {
     setViewAngle(angle);
-    if (angle === "back") setPlacement("back");
-    else if (angle === "sleeve_left") setPlacement("sleeve_left");
-    else if (angle === "sleeve_right") setPlacement("sleeve_right");
+    if (angle === "back" && availablePlacements.some((p) => p.id === "back")) setPlacement("back");
+    else if (angle === "sleeve_left" && availablePlacements.some((p) => p.id === "sleeve_left")) setPlacement("sleeve_left");
+    else if (angle === "sleeve_right" && availablePlacements.some((p) => p.id === "sleeve_right")) setPlacement("sleeve_right");
     else if (angle === "front" && (placement === "back" || placement === "sleeve_left" || placement === "sleeve_right")) {
       setPlacement("center");
     }
@@ -265,21 +354,39 @@ export default function Configurator() {
 
             {/* Authentic Spreadshirt Garment Canvas */}
             <div className="garment-stage">
-              {/* Authentic Spreadshirt High-Res Render Image */}
-              <img src={currentMockupImage} alt={selectedItem.label} className="garment-base-img authentic" />
+              <div className="garment-canvas" data-product={item} data-view={viewAngle}>
+                {/* Authentic Spreadshirt High-Res Render Image */}
+                <img src={currentMockupImage} alt={selectedItem.label} className="garment-base-img authentic" />
 
-              {/* Print zone - only shown when artwork uploaded or from Step 3 (Macro/Upload) onwards */}
-              {(preview || currentStep >= 3) && (
-                <div className={`canvas-print-zone pos-${placement} ${preview ? "has-image" : ""}`}>
+                {/* The zone and product share one square coordinate system at every viewport size. */}
+                {(preview || currentStep >= 3) && currentPrintZone && (
                   <div
-                    className="canvas-artwork"
-                    style={{
-                      backgroundImage: preview ? `url(${preview})` : undefined,
-                      transform: `scale(${artScale}) rotate(${artRotation}deg)`,
-                    }}
-                  />
-                </div>
-              )}
+                    className={`canvas-print-zone ${preview ? "has-image" : ""}`}
+                    style={getPrintZoneStyle(currentPrintZone)}
+                    aria-label={`Допустимая область печати: ${selectedItem.label}, ${viewAngle}`}
+                  >
+                    {!preview && currentPrintZone.width / currentPrintZone.canvas >= 0.18 && (
+                      <span className="print-zone-label">
+                        {currentPrintZone.width / currentPrintZone.canvas < 0.25 ? "Принт" : "Зона печати"}
+                      </span>
+                    )}
+                    {preview && (
+                      <div className={`canvas-artwork-position art-pos-${placement}`}>
+                        <div
+                          className="canvas-artwork"
+                          style={{
+                            backgroundImage: `url(${preview})`,
+                            transform: `scale(${artScale}) rotate(${artRotation}deg)`,
+                          }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
+                {(preview || currentStep >= 3) && !currentPrintZone && (
+                  <div className="print-zone-unavailable">На этом ракурсе нанесение недоступно</div>
+                )}
+              </div>
             </div>
 
             {/* Camera Angle View Selector Thumbnails (Spreadshirt Style) */}
@@ -292,13 +399,13 @@ export default function Configurator() {
                   { id: "sleeve_left", label: item === "cap" ? "Лев. ракурс" : "Лев. рукав", slug: "sleeve-left" },
                 ]),
               ].map((v) => {
-                const thumbSrc = getMockupPath(item, color, v.id);
+                const thumbSrc = getMockupPath(item, color, v.id as ViewAngle);
                 const isActive = viewAngle === v.id;
                 return (
                   <button
                     key={v.id}
                     className={`view-thumb-btn ${isActive ? "active" : ""}`}
-                    onClick={() => handleSelectViewAngle(v.id as "front" | "back" | "sleeve_left" | "sleeve_right")}
+                    onClick={() => handleSelectViewAngle(v.id as ViewAngle)}
                     type="button"
                   >
                     <div className="thumb-box">
@@ -355,7 +462,9 @@ export default function Configurator() {
                       if (!availColors.some((c) => c.id === color)) {
                         setColor(availColors[0].id);
                       }
-                      if (i.id === "bag" && (viewAngle === "sleeve_left" || viewAngle === "sleeve_right")) {
+                      const nextPlacements = getAvailablePlacementsForItem(i.id);
+                      if (!nextPlacements.some((placementOption) => placementOption.id === placement) || !getPrintZone(i.id, viewAngle)) {
+                        setPlacement("center");
                         setViewAngle("front");
                       }
                       setCurrentStep(2);
@@ -425,17 +534,20 @@ export default function Configurator() {
               <div className="section-block">
                 <h3>Расположение принта</h3>
                 <div className="placements-grid">
-                  {placements.map((p) => (
-                    <button
-                      key={p.id}
-                      className={`placement-card ${placement === p.id ? "selected" : ""}`}
-                      onClick={() => handleSelectPlacement(p.id)}
-                      type="button"
-                    >
-                      <b>{p.label}</b>
-                      <small>{p.sub}</small>
-                    </button>
-                  ))}
+                  {availablePlacements.map((p) => {
+                    const placementCopy = getPlacementCopy(item, p);
+                    return (
+                      <button
+                        key={p.id}
+                        className={`placement-card ${placement === p.id ? "selected" : ""}`}
+                        onClick={() => handleSelectPlacement(p.id)}
+                        type="button"
+                      >
+                        <b>{placementCopy.label}</b>
+                        <small>{placementCopy.sub}</small>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -564,7 +676,7 @@ export default function Configurator() {
                     <div className="summary-list">
                       <div className="summary-row"><span>Изделие:</span><b>{selectedItem.label} ({selectedColor.label})</b></div>
                       <div className="summary-row"><span>Печать:</span><b>{methods[method].label} ({selectedSize.label})</b></div>
-                      <div className="summary-row"><span>Расположение:</span><b>{selectedPlacement.label}</b></div>
+                      <div className="summary-row"><span>Расположение:</span><b>{selectedPlacementCopy.label}</b></div>
                       <div className="summary-row"><span>Файл принта:</span><b>{fileName || "Не загружен"}</b></div>
                       <div className="summary-row"><span>Количество:</span><b>{qty} шт.</b></div>
                       <hr className="my-2"/>
