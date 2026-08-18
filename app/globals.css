@@ -788,6 +788,12 @@ footer{background:#141517;color:#fff;padding:55px 6vw;display:grid;grid-template
   touch-action: none;
 }
 
+.canvas-print-zone.is-editable:not(.has-image),
+.canvas-print-zone.is-editable:not(.has-image):hover {
+  border-color: transparent;
+  background: transparent;
+}
+
 .canvas-upload-trigger {
   position: relative;
   z-index: 4;
