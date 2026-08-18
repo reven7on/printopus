@@ -611,12 +611,19 @@ footer{background:#141517;color:#fff;padding:55px 6vw;display:grid;grid-template
   border: 1px solid #e5e7eb;
 }
 
-.garment-canvas {
+.garment-canvas-frame {
   position: relative;
-  height: 100%;
+  width: 100%;
   max-width: 100%;
   aspect-ratio: 1 / 1;
   flex: none;
+}
+
+.garment-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   transition: transform 0.24s ease;
 }
 
@@ -1930,6 +1937,11 @@ footer{background:#141517;color:#fff;padding:55px 6vw;display:grid;grid-template
     width: min(100%, 430px);
     max-height: none;
     border-radius: 0;
+  }
+
+  .config-wizard-body.step-3 .garment-stage.workspace-zoomed {
+    height: clamp(375px, calc(100dvh - 232px), 620px);
+    aspect-ratio: auto;
   }
 
   .config-wizard-body.step-3 .stage-header {

@@ -756,12 +756,13 @@ export default function Configurator() {
 
             {/* Authentic Spreadshirt Garment Canvas */}
             <div className={`garment-stage ${workspaceZoomed && hasArtwork ? "workspace-zoomed" : ""}`}>
-              <div
-                className="garment-canvas"
-                data-product={item}
-                data-view={viewAngle}
-                style={currentStep === 3 && currentPrintZone ? getWorkspaceCanvasStyle(currentPrintZone, workspaceZoomed && hasArtwork) : undefined}
-              >
+              <div className="garment-canvas-frame">
+                <div
+                  className="garment-canvas"
+                  data-product={item}
+                  data-view={viewAngle}
+                  style={currentStep === 3 && currentPrintZone ? getWorkspaceCanvasStyle(currentPrintZone, workspaceZoomed && hasArtwork) : undefined}
+                >
                 {/* Authentic Spreadshirt High-Res Render Image */}
                 <img src={currentMockupImage} alt={selectedItem.label} className="garment-base-img authentic" />
 
@@ -841,8 +842,8 @@ export default function Configurator() {
                 {(hasArtwork || currentStep >= 3) && !currentPrintZone && (
                   <div className="print-zone-unavailable">На этом ракурсе нанесение недоступно</div>
                 )}
-              </div>
-              {currentStep === 3 && currentPrintZone && selectedElement && (
+                </div>
+                {currentStep === 3 && currentPrintZone && selectedElement && (
                   <div
                     className="canvas-element-toolbar"
                     style={getElementToolbarStyle(currentPrintZone, selectedElement, workspaceZoomed)}
@@ -863,7 +864,8 @@ export default function Configurator() {
                     </button>
                   </div>
                 )}
-                {currentStep === 3 && currentPrintZone && hasArtwork && (
+              </div>
+              {currentStep === 3 && currentPrintZone && hasArtwork && (
                   <button
                     type="button"
                     className={`canvas-workspace-zoom ${workspaceZoomed ? "active" : ""}`}
