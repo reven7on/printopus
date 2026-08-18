@@ -1317,9 +1317,8 @@ export default function Configurator() {
                 <b>от {selectedItem.base + selectedColor.add} BYN</b>
               </div>
               <div className="designer-mobile-navigation">
-                <button type="button" onClick={() => { setMobileDesignPanelOpen(false); setCurrentStep(2); }}>
-                  <ConfigIcon name="shirt" size={22}/>
-                  <span>Товар</span>
+                <button type="button" onClick={() => { setMobileDesignPanelOpen(false); setCurrentStep(2); }} aria-label="Назад к цвету и размеру">
+                  <ConfigIcon name="arrowLeft" size={24}/>
                 </button>
                 <button
                   type="button"

@@ -2212,7 +2212,7 @@ footer{background:#141517;color:#fff;padding:55px 6vw;display:grid;grid-template
   .designer-mobile-navigation {
     height: 64px;
     display: grid;
-    grid-template-columns: 1fr 1fr 86px;
+    grid-template-columns: 86px 1fr 86px;
   }
 
   .designer-mobile-navigation button {
