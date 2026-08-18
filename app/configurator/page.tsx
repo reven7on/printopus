@@ -186,6 +186,23 @@ function getPrintZoneStyle(zone: PrintZone): CSSProperties {
   };
 }
 
+function getElementToolbarStyle(zone: PrintZone, element: DesignElement): CSSProperties {
+  const zoneLeft = (zone.x / zone.canvas) * 100;
+  const zoneTop = (zone.y / zone.canvas) * 100;
+  const zoneWidth = (zone.width / zone.canvas) * 100;
+  const zoneHeight = (zone.height / zone.canvas) * 100;
+  const elementCenterX = zoneLeft + zoneWidth * (element.x / 100);
+  const elementCenterY = zoneTop + zoneHeight * (element.y / 100);
+  const imageHalfSize = element.type === "image"
+    ? zoneWidth * (element.width / 100) * element.scale * 0.5
+    : 4;
+
+  return {
+    left: `${clamp(elementCenterX, 25, 75)}%`,
+    top: `${clamp(elementCenterY - imageHalfSize - 2, 12, 88)}%`,
+  };
+}
+
 function getAvailablePlacementsForItem(itemKey: ItemId) {
   const availableIds = placementIdsByItem[itemKey];
   return placements.filter((placementOption) => availableIds.includes(placementOption.id));
@@ -789,6 +806,27 @@ export default function Configurator() {
                     ))}
                   </div>
                 )}
+                {currentStep === 3 && currentPrintZone && selectedElement && (
+                  <div
+                    className="canvas-element-toolbar"
+                    style={getElementToolbarStyle(currentPrintZone, selectedElement)}
+                    role="toolbar"
+                    aria-label="Управление выбранным элементом"
+                  >
+                    <button type="button" onClick={() => updateSelectedElement({ scale: +clamp(selectedElement.scale - 0.1, 0.35, 2.2).toFixed(2) })} title="Уменьшить" aria-label="Уменьшить">
+                      <ConfigIcon name="minus" size={18}/>
+                    </button>
+                    <button type="button" onClick={() => updateSelectedElement({ scale: +clamp(selectedElement.scale + 0.1, 0.35, 2.2).toFixed(2) })} title="Увеличить" aria-label="Увеличить">
+                      <ConfigIcon name="plus" size={18}/>
+                    </button>
+                    <button type="button" onClick={() => updateSelectedElement({ rotation: (selectedElement.rotation + 15) % 360 })} title="Повернуть на 15 градусов" aria-label="Повернуть на 15 градусов">
+                      <ConfigIcon name="rotate" size={18}/>
+                    </button>
+                    <button type="button" onClick={deleteSelectedElement} className="danger" title="Удалить" aria-label="Удалить">
+                      <ConfigIcon name="trash" size={18}/>
+                    </button>
+                  </div>
+                )}
                 {(hasArtwork || currentStep >= 3) && !currentPrintZone && (
                   <div className="print-zone-unavailable">На этом ракурсе нанесение недоступно</div>
                 )}
@@ -805,25 +843,6 @@ export default function Configurator() {
               )}
             </div>
 
-            {currentStep === 3 && selectedElement && (
-              <div className="canvas-transform-toolbar" aria-label="Настройки выбранного элемента">
-                <button type="button" onClick={() => updateSelectedElement({ scale: +clamp(selectedElement.scale - 0.1, 0.35, 2.2).toFixed(2) })} title="Уменьшить" aria-label="Уменьшить">
-                  <ConfigIcon name="minus" size={16}/>
-                </button>
-                <button type="button" onClick={() => updateSelectedElement({ scale: +clamp(selectedElement.scale + 0.1, 0.35, 2.2).toFixed(2) })} title="Увеличить" aria-label="Увеличить">
-                  <ConfigIcon name="plus" size={16}/>
-                </button>
-                <button type="button" onClick={() => updateSelectedElement({ rotation: (selectedElement.rotation + 15) % 360 })} title="Повернуть на 15 градусов">
-                  <ConfigIcon name="rotate" size={16}/><span>15°</span>
-                </button>
-                <button type="button" onClick={() => updateSelectedElement({ x: 50, y: 46 })} title="Разместить по центру">
-                  <ConfigIcon name="target" size={16}/><span>По центру</span>
-                </button>
-                <button type="button" onClick={deleteSelectedElement} className="danger" title="Удалить" aria-label="Удалить">
-                  <ConfigIcon name="trash" size={16}/>
-                </button>
-              </div>
-            )}
           </div>
         </div>
         )}
