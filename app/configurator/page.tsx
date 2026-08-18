@@ -7,7 +7,7 @@ import Link from "next/link";
 type ItemId = "shirt" | "hoodie" | "polo" | "cap" | "bag";
 type ViewAngle = "front" | "back" | "sleeve_left" | "sleeve_right";
 type PlacementId = "center" | "chest_left" | "back" | "sleeve_left" | "sleeve_right";
-type DesignerTool = "image" | "text" | "position";
+type DesignerTool = "image" | "text";
 type DesignElementType = "image" | "text";
 
 type DesignElement = {
@@ -608,15 +608,6 @@ export default function Configurator() {
     transformGestureRef.current = null;
   }
 
-  function handleSelectPlacement(pId: PlacementId) {
-    setPlacement(pId);
-    const targetPlacement = placements.find((p) => p.id === pId);
-    if (targetPlacement) {
-      setViewAngle(targetPlacement.view as ViewAngle);
-      setSelectedElementId(null);
-    }
-  }
-
   function handleSubmitOrder(e?: React.SyntheticEvent) {
     if (e) e.preventDefault();
     if (!customerPhone.trim()) return;
@@ -1001,7 +992,6 @@ export default function Configurator() {
                 {[
                   { id: "image", label: "Изображение", icon: "image" },
                   { id: "text", label: "Текст", icon: "type" },
-                  { id: "position", label: "Положение", icon: "move" },
                 ].map((tool) => (
                   <button
                     key={tool.id}
@@ -1082,24 +1072,6 @@ export default function Configurator() {
                   </div>
                 )}
 
-                {activeDesignerTool === "position" && (
-                  <div className="placements-grid designer-placements">
-                    {availablePlacements.map((placementOption) => {
-                      const placementCopy = getPlacementCopy(item, placementOption);
-                      return (
-                        <button
-                          key={placementOption.id}
-                          className={`placement-card ${placement === placementOption.id ? "selected" : ""}`}
-                          onClick={() => handleSelectPlacement(placementOption.id)}
-                          type="button"
-                        >
-                          <b>{placementCopy.label}</b>
-                          <small>{placementCopy.sub}</small>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
               </div>
 
               {currentElements.length > 0 && (

@@ -996,7 +996,7 @@ footer{background:#141517;color:#fff;padding:55px 6vw;display:grid;grid-template
 /* MOBILE-FIRST DESIGNER TOOLS */
 .designer-tool-tabs {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   border: 1px solid #e5e7eb;
   border-radius: 10px 10px 0 0;
   overflow: hidden;
@@ -1189,10 +1189,6 @@ footer{background:#141517;color:#fff;padding:55px 6vw;display:grid;grid-template
 
 .designer-text-options .button-primary {
   margin-left: auto;
-}
-
-.designer-placements {
-  gap: 8px;
 }
 
 .designer-elements-row {
@@ -2007,10 +2003,6 @@ footer{background:#141517;color:#fff;padding:55px 6vw;display:grid;grid-template
   .designer-color-control,
   .designer-format-button {
     justify-content: center;
-  }
-
-  .designer-placements {
-    grid-template-columns: 1fr 1fr;
   }
 
   .designer-elements-row {
