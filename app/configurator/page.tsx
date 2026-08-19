@@ -29,7 +29,7 @@ type DesignElement = {
 type DesignsByView = Record<ViewAngle, DesignElement[]>;
 
 type TransformGesture = {
-  mode: "move" | "resize";
+  mode: "move" | "resize" | "rotate";
   elementId: string;
   view: ViewAngle;
   before: DesignsByView;
@@ -42,6 +42,8 @@ type TransformGesture = {
   centerY: number;
   startDistance: number;
   startScale: number;
+  startAngle: number;
+  startRotation: number;
 };
 
 type PrintZone = {
@@ -583,6 +585,8 @@ export default function Configurator() {
       centerY: elementRect.top + elementRect.height / 2,
       startDistance: 0,
       startScale: element.scale,
+      startAngle: 0,
+      startRotation: element.rotation,
     };
   }
 
@@ -611,6 +615,38 @@ export default function Configurator() {
       centerY,
       startDistance: Math.max(1, Math.hypot(event.clientX - centerX, event.clientY - centerY)),
       startScale: element.scale,
+      startAngle: 0,
+      startRotation: element.rotation,
+    };
+  }
+
+  function startRotateGesture(event: ReactPointerEvent<HTMLSpanElement>, element: DesignElement) {
+    event.preventDefault();
+    event.stopPropagation();
+    const elementNode = event.currentTarget.parentElement;
+    const zoneNode = elementNode?.parentElement;
+    if (!elementNode || !zoneNode) return;
+    const elementRect = elementNode.getBoundingClientRect();
+    const zoneRect = zoneNode.getBoundingClientRect();
+    const centerX = elementRect.left + elementRect.width / 2;
+    const centerY = elementRect.top + elementRect.height / 2;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    transformGestureRef.current = {
+      mode: "rotate",
+      elementId: element.id,
+      view: viewAngle,
+      before: designs,
+      moved: false,
+      zoneRect,
+      elementRect,
+      grabOffsetX: 0,
+      grabOffsetY: 0,
+      centerX,
+      centerY,
+      startDistance: 0,
+      startScale: element.scale,
+      startAngle: Math.atan2(event.clientY - centerY, event.clientX - centerX),
+      startRotation: element.rotation,
     };
   }
 
@@ -619,6 +655,15 @@ export default function Configurator() {
     if (!gesture) return;
     event.preventDefault();
     gesture.moved = true;
+    if (gesture.mode === "rotate") {
+      const angle = Math.atan2(event.clientY - gesture.centerY, event.clientX - gesture.centerX);
+      const angleDelta = ((angle - gesture.startAngle) * 180) / Math.PI;
+      const rotation = ((gesture.startRotation + angleDelta) % 360 + 360) % 360;
+      updateElementLive(gesture.view, gesture.elementId, {
+        rotation: +rotation.toFixed(1),
+      });
+      return;
+    }
     if (gesture.mode === "resize") {
       const distance = Math.hypot(event.clientX - gesture.centerX, event.clientY - gesture.centerY);
       updateElementLive(gesture.view, gesture.elementId, {
@@ -826,14 +871,28 @@ export default function Configurator() {
                           <span>{element.content}</span>
                         )}
                         {selectedElementId === element.id && currentStep === 3 && (
-                          <span
-                            className="design-resize-handle"
-                            aria-hidden="true"
-                            onPointerDown={(event) => startResizeGesture(event, element)}
-                            onPointerMove={(event) => { event.stopPropagation(); handleTransformMove(event); }}
-                            onPointerUp={(event) => { event.stopPropagation(); finishTransformGesture(event); }}
-                            onPointerCancel={(event) => { event.stopPropagation(); finishTransformGesture(event); }}
-                          />
+                          <>
+                            <span
+                              className="design-resize-handle"
+                              style={{ transform: `scale(${1 / element.scale})` }}
+                              aria-hidden="true"
+                              onPointerDown={(event) => startResizeGesture(event, element)}
+                              onPointerMove={(event) => { event.stopPropagation(); handleTransformMove(event); }}
+                              onPointerUp={(event) => { event.stopPropagation(); finishTransformGesture(event); }}
+                              onPointerCancel={(event) => { event.stopPropagation(); finishTransformGesture(event); }}
+                            />
+                            <span
+                              className="design-rotate-handle"
+                              style={{ transform: `translateX(-50%) scale(${1 / element.scale})` }}
+                              aria-hidden="true"
+                              onPointerDown={(event) => startRotateGesture(event, element)}
+                              onPointerMove={(event) => { event.stopPropagation(); handleTransformMove(event); }}
+                              onPointerUp={(event) => { event.stopPropagation(); finishTransformGesture(event); }}
+                              onPointerCancel={(event) => { event.stopPropagation(); finishTransformGesture(event); }}
+                            >
+                              <ConfigIcon name="rotate" size={16}/>
+                            </span>
+                          </>
                         )}
                       </button>
                     ))}

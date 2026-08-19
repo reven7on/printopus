@@ -961,6 +961,39 @@ footer{background:#141517;color:#fff;padding:55px 6vw;display:grid;grid-template
   touch-action: none;
 }
 
+.design-rotate-handle {
+  position: absolute;
+  left: 50%;
+  bottom: -50px;
+  z-index: 4;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #d1d5db;
+  border-radius: 50%;
+  background: #ffffff;
+  color: var(--red);
+  box-shadow: 0 4px 12px rgba(17, 24, 39, 0.18);
+  cursor: grab;
+  touch-action: none;
+  transform-origin: center;
+}
+
+.design-rotate-handle::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 100%;
+  width: 1px;
+  height: 15px;
+  background: #2563eb;
+}
+
+.design-rotate-handle:active {
+  cursor: grabbing;
+}
+
 .logo-placeholder {
   text-align: center;
   color: #2563eb;
