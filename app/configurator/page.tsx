@@ -915,9 +915,6 @@ export default function Configurator() {
                     <button type="button" onClick={() => updateSelectedElement({ scale: +clamp(selectedElement.scale + 0.1, 0.35, 2.2).toFixed(2) })} title="Увеличить" aria-label="Увеличить">
                       <ConfigIcon name="plus" size={18}/>
                     </button>
-                    <button type="button" onClick={() => updateSelectedElement({ rotation: (selectedElement.rotation + 15) % 360 })} title="Повернуть на 15 градусов" aria-label="Повернуть на 15 градусов">
-                      <ConfigIcon name="rotate" size={18}/>
-                    </button>
                     <button type="button" onClick={deleteSelectedElement} className="danger" title="Удалить" aria-label="Удалить">
                       <ConfigIcon name="trash" size={18}/>
                     </button>
