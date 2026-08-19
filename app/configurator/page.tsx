@@ -46,6 +46,11 @@ type TransformGesture = {
   startRotation: number;
 };
 
+type SnapGuides = {
+  vertical: boolean;
+  horizontal: boolean;
+};
+
 type PrintZone = {
   canvas: number;
   x: number;
@@ -349,6 +354,7 @@ export default function Configurator() {
   const [mobileDesignPanelOpen, setMobileDesignPanelOpen] = useState(false);
   const [workspaceZoomed, setWorkspaceZoomed] = useState(false);
   const [historyAvailability, setHistoryAvailability] = useState({ undo: 0, redo: 0 });
+  const [snapGuides, setSnapGuides] = useState<SnapGuides>({ vertical: false, horizontal: false });
 
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
@@ -567,6 +573,7 @@ export default function Configurator() {
     if (event.button !== 0) return;
     event.preventDefault();
     selectDesignElement(element);
+    setSnapGuides({ vertical: false, horizontal: false });
     const elementRect = event.currentTarget.getBoundingClientRect();
     const zoneRect = event.currentTarget.parentElement?.getBoundingClientRect();
     if (!zoneRect) return;
@@ -676,9 +683,14 @@ export default function Configurator() {
     const halfHeight = Math.min(45, (gesture.elementRect.height / gesture.zoneRect.height) * 50);
     const x = ((event.clientX - gesture.grabOffsetX - gesture.zoneRect.left) / gesture.zoneRect.width) * 100;
     const y = ((event.clientY - gesture.grabOffsetY - gesture.zoneRect.top) / gesture.zoneRect.height) * 100;
+    const clampedX = clamp(x, halfWidth, 100 - halfWidth);
+    const clampedY = clamp(y, halfHeight, 100 - halfHeight);
+    const snapX = Math.abs(clampedX - 50) <= (10 / gesture.zoneRect.width) * 100;
+    const snapY = Math.abs(clampedY - 50) <= (10 / gesture.zoneRect.height) * 100;
+    setSnapGuides({ vertical: snapX, horizontal: snapY });
     updateElementLive(gesture.view, gesture.elementId, {
-      x: +clamp(x, halfWidth, 100 - halfWidth).toFixed(2),
-      y: +clamp(y, halfHeight, 100 - halfHeight).toFixed(2),
+      x: snapX ? 50 : +clampedX.toFixed(2),
+      y: snapY ? 50 : +clampedY.toFixed(2),
     });
   }
 
@@ -694,6 +706,7 @@ export default function Configurator() {
       setHistoryAvailability({ undo: historyRef.current.length, redo: 0 });
     }
     transformGestureRef.current = null;
+    setSnapGuides({ vertical: false, horizontal: false });
   }
 
   function handleSubmitOrder(e?: React.SyntheticEvent) {
@@ -821,6 +834,8 @@ export default function Configurator() {
                       if (event.target === event.currentTarget) setSelectedElementId(null);
                     }}
                   >
+                    {snapGuides.vertical && <span className="canvas-center-guide vertical" aria-hidden="true" />}
+                    {snapGuides.horizontal && <span className="canvas-center-guide horizontal" aria-hidden="true" />}
                     {!hasArtwork && currentStep === 3 && (
                       <button
                         type="button"

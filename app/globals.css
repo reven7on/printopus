@@ -773,8 +773,8 @@ footer{background:#141517;color:#fff;padding:55px 6vw;display:grid;grid-template
 .canvas-print-zone {
   position: absolute;
   z-index: 10;
-  border: 2px dashed #2563eb;
-  background: rgba(37, 99, 235, 0.04);
+  border: 2px dashed rgba(237, 16, 23, 0.65);
+  background: rgba(237, 16, 23, 0.025);
   border-radius: 4px;
   display: grid;
   place-items: center;
@@ -783,11 +783,11 @@ footer{background:#141517;color:#fff;padding:55px 6vw;display:grid;grid-template
   overflow: hidden;
 }
 .canvas-print-zone:hover {
-  border-color: #1d4ed8;
-  background: rgba(37, 99, 235, 0.07);
+  border-color: var(--red);
+  background: rgba(237, 16, 23, 0.045);
 }
 .canvas-print-zone.has-image {
-  border-color: #2563eb;
+  border-color: rgba(237, 16, 23, 0.7);
   border-style: dashed;
   background: transparent;
 }
@@ -815,9 +815,9 @@ footer{background:#141517;color:#fff;padding:55px 6vw;display:grid;grid-template
   gap: 6px;
   border: 0;
   border-radius: 50%;
-  background: #dff2ff;
-  color: #075da8;
-  box-shadow: 0 0 0 10px rgba(7, 93, 168, 0.08), 0 5px 18px rgba(17, 24, 39, 0.12);
+  background: #fff1f2;
+  color: var(--red);
+  box-shadow: 0 0 0 10px rgba(237, 16, 23, 0.08), 0 5px 18px rgba(17, 24, 39, 0.12);
   font-size: 10px;
   font-weight: 850;
   line-height: 1.2;
@@ -827,14 +827,14 @@ footer{background:#141517;color:#fff;padding:55px 6vw;display:grid;grid-template
 }
 
 .canvas-upload-trigger:hover {
-  background: #cceaff;
+  background: #ffe4e6;
 }
 
 .canvas-upload-trigger.compact {
   width: min(40px, calc(100% - 4px));
   height: min(40px, calc(100% - 4px));
   padding: 0;
-  box-shadow: 0 0 0 5px rgba(7, 93, 168, 0.08), 0 3px 10px rgba(17, 24, 39, 0.12);
+  box-shadow: 0 0 0 5px rgba(237, 16, 23, 0.08), 0 3px 10px rgba(17, 24, 39, 0.12);
 }
 
 .canvas-upload-trigger.compact span {
@@ -848,7 +848,7 @@ footer{background:#141517;color:#fff;padding:55px 6vw;display:grid;grid-template
   padding: 3px 6px;
   border-radius: 5px;
   background: rgba(255,255,255,0.88);
-  color: #1d4ed8;
+  color: var(--red);
   font-size: 9px;
   font-weight: 800;
   line-height: 1;
@@ -920,7 +920,7 @@ footer{background:#141517;color:#fff;padding:55px 6vw;display:grid;grid-template
 }
 
 .canvas-design-element.selected {
-  box-shadow: 0 0 0 2px #2563eb;
+  box-shadow: 0 0 0 2px var(--red);
 }
 
 .canvas-design-element img {
@@ -953,7 +953,7 @@ footer{background:#141517;color:#fff;padding:55px 6vw;display:grid;grid-template
   bottom: -8px;
   width: 16px;
   height: 16px;
-  border: 2px solid #2563eb;
+  border: 2px solid var(--red);
   border-radius: 50%;
   background: #ffffff;
   box-shadow: 0 1px 4px rgba(17, 24, 39, 0.18);
@@ -987,7 +987,27 @@ footer{background:#141517;color:#fff;padding:55px 6vw;display:grid;grid-template
   bottom: 100%;
   width: 1px;
   height: 15px;
-  background: #2563eb;
+  background: var(--red);
+}
+
+.canvas-center-guide {
+  position: absolute;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.canvas-center-guide.vertical {
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  border-left: 1px dashed var(--red);
+}
+
+.canvas-center-guide.horizontal {
+  top: 50%;
+  left: 0;
+  right: 0;
+  border-top: 1px dashed var(--red);
 }
 
 .design-rotate-handle:active {
@@ -996,15 +1016,15 @@ footer{background:#141517;color:#fff;padding:55px 6vw;display:grid;grid-template
 
 .logo-placeholder {
   text-align: center;
-  color: #2563eb;
+  color: var(--red);
   pointer-events: none;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 2px;
 }
-.logo-placeholder b { font-size: 13px; letter-spacing: 0.05em; display: block; color: #1e40af; }
-.logo-placeholder small { font-size: 10.5px; color: #3b82f6; display: block; }
+.logo-placeholder b { font-size: 13px; letter-spacing: 0.05em; display: block; color: #b50d13; }
+.logo-placeholder small { font-size: 10.5px; color: #d71920; display: block; }
 
 /* CONTEXTUAL ELEMENT TOOLBAR */
 .canvas-element-toolbar {
@@ -1297,9 +1317,9 @@ footer{background:#141517;color:#fff;padding:55px 6vw;display:grid;grid-template
 }
 
 .designer-element-chips button.active {
-  border-color: #2563eb;
-  color: #1d4ed8;
-  box-shadow: inset 0 0 0 1px #2563eb;
+  border-color: var(--red);
+  color: var(--red);
+  box-shadow: inset 0 0 0 1px var(--red);
 }
 
 .designer-element-chips button span {
