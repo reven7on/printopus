@@ -7,16 +7,21 @@
 - `app/page.tsx` — главная страница.
 - `app/configurator/page.tsx` — конструктор заказа.
 - `app/globals.css` — общие стили сайта и конфигуратора.
-- `worker/index.ts` — Cloudflare Worker entry point для Vinext.
 - `public/` — изображения, логотипы и мокапы изделий.
 
 ## Команды
 
 - `npm run dev` — локальный запуск.
-- `npm run build` — production-сборка и проверка артефакта.
-- `npm test` — сборка и smoke-тест HTML.
+- `npm run build` — production-сборка Next.js.
+- `npm run start` — запуск production-сборки.
+- `npm run typecheck` — проверка TypeScript.
+- `npm test` — сборка и smoke-тест главной страницы и конфигуратора.
 - `npm run lint` — проверка ESLint.
 
-## Примечания
+## Развёртывание
 
-Проект оставлен совместимым с текущей Vinext/Cloudflare Sites сборкой. Заготовки базы данных, тестовые D1-примеры и helper для ChatGPT sign-in удалены, потому что сайт сейчас ими не пользуется.
+Проект использует стандартный Next.js и рассчитан на Node.js-хостинг или VPS.
+После `npm run build` можно запускать сайт командой `npm run start` за
+обратным прокси Nginx/Caddy. Для компактного деплоя также создаётся
+`.next/standalone`; вместе с ним на сервер нужно перенести `public` и
+`.next/static`.

@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-:root{--ink:#111214;--muted:#686b72;--line:#e7e8eb;--paper:#fff;--wash:#f5f6f7;--red:#ed1017;--red-dark:#c90009;--font:var(--font-manrope),Arial,sans-serif}
+:root{--ink:#111214;--muted:#686b72;--line:#e7e8eb;--paper:#fff;--wash:#f5f6f7;--red:#ed1017;--red-dark:#c90009;--font:"Segoe UI",Arial,sans-serif}
 .brand-logo-img{width:56px;height:56px;object-fit:cover;border-radius:10px;box-shadow:0 4px 14px rgba(0,0,0,0.12);border:1px solid rgba(0,0,0,0.08);transition:transform 0.2s}
 .brand:hover .brand-logo-img{transform:scale(1.04)}
 .brand-title b{color:#111214;font-size:22px;letter-spacing:-.03em;font-weight:900}
