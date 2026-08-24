@@ -1,7 +1,15 @@
 "use client";
 
+import Image from "next/image";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
+import {
+  DEFAULT_PRINT_METHOD_PRICE,
+  FIRST_VOLUME_DISCOUNT_QUANTITY,
+  MAX_VOLUME_DISCOUNT_PERCENT,
+  PRINT_FORMATS,
+  PRODUCT_BASE_PRICES,
+} from "./pricing";
 
 function Icon({ name }: { name: string }) {
   const shapes: Record<string, ReactNode> = {
@@ -24,26 +32,125 @@ function Icon({ name }: { name: string }) {
 }
 
 const products = [
-  { title: "Футболки и поло", copy: "100% плотный хлопок (180–240 г/м²). Премиум посадка, не садится после стирки.", image: "/product-shirt.png", kind: "shirt" },
-  { title: "Толстовки и худи", copy: "Утеплённый футер с начёсом (320–380 г/м²). Оверсайз крои и стойкая вышивка.", image: "/product-hoodie.png", kind: "hoodie" },
-  { title: "Головные уборы", copy: "6-панельные бейсболки и шапки. Объёмная 3D-вышивка и аккуратные шевроны.", image: "/product-cap.png", kind: "cap" },
-  { title: "Шоперы и сумки", copy: "Хлопковый канвас 280 г/м². Нагрузка до 15 кг, стойкая шелкография.", image: "/product-shopper.png", kind: "bag" },
+  {
+    title: "Футболки и поло",
+    copy: "Плотный хлопок 180–240 г/м². Классическая или свободная посадка.",
+    image: "/product-shirt.webp",
+    kind: "shirt",
+    methods: [
+      ["DTF-печать", "Перед, спина и рукава"],
+      ["Шелкография", "Для ярких тиражей от 20 штук"],
+      ["Вышивка", "Грудь, рукав или небольшой шеврон"],
+    ],
+    fit: ["Классическая и оверсайз", "Размеры XS–5XL", "Женские и детские модели — по запросу"],
+    material: ["Хлопок или смесовый трикотаж", "180–240 г/м²"],
+    scales: [["Плотность", 58], ["Мягкость", 74]],
+    features: [
+      ["Стабильная форма", "Предусадочная обработка полотна"],
+      ["Стойкое нанесение", "50+ стирок при правильном уходе"],
+      ["Фирменные цвета", "Подберём оттенок под стиль бренда"],
+    ],
+  },
+  {
+    title: "Толстовки и худи",
+    copy: "Тёплый футер 320–380 г/м². Подходит для вышивки и крупных принтов.",
+    image: "/product-hoodie.webp",
+    kind: "hoodie",
+    methods: [
+      ["DTF-печать", "Грудь, спина и рукава"],
+      ["Шелкография", "Перед и спина для средних тиражей"],
+      ["Вышивка", "Грудь, рукав или край капюшона"],
+    ],
+    fit: ["Свободная и оверсайз", "Размеры XS–4XL", "Модели с молнией и без неё"],
+    material: ["Футер с начёсом или петлёй", "320–380 г/м²"],
+    scales: [["Плотность", 90], ["Мягкость", 82]],
+    features: [
+      ["Тёплая основа", "Комфортна для прохладной погоды"],
+      ["Усиленные швы", "Рассчитаны на регулярную носку"],
+      ["Стойкое нанесение", "50+ стирок при правильном уходе"],
+    ],
+  },
+  {
+    title: "Головные уборы",
+    copy: "Бейсболки и шапки с плоской, объёмной вышивкой или шевронами.",
+    image: "/product-cap.webp",
+    kind: "cap",
+    methods: [
+      ["Плоская вышивка", "Спереди, сбоку или сзади"],
+      ["3D-вышивка", "Объёмный логотип на фронтальной панели"],
+      ["Шевроны", "Тканые и вышитые нашивки"],
+    ],
+    fit: ["Шестипанельная конструкция", "Обхват 54–62 см", "Регулируемая застёжка"],
+    material: ["Хлопковый твил или смесовая ткань", "Плотная формованная основа"],
+    scales: [["Плотность", 72], ["Мягкость", 42]],
+    features: [
+      ["Чёткая форма", "Усиленная фронтальная панель"],
+      ["Точная детализация", "Подходит для небольших логотипов"],
+      ["Выбор основы", "Разные цвета, козырьки и застёжки"],
+    ],
+  },
+  {
+    title: "Шоперы и сумки",
+    copy: "Канвас 280 г/м². Большая зона печати и усиленные длинные ручки.",
+    image: "/product-shopper.webp",
+    kind: "bag",
+    methods: [
+      ["Шелкография", "Одна или две стороны, выгодно для тиража"],
+      ["DTF-печать", "Полноцветные изображения и градиенты"],
+      ["Вышивка", "Небольшой знак или надпись"],
+    ],
+    fit: ["Базовый размер 38 × 42 см", "Ручки длиной около 70 см", "Другие размеры — под заказ"],
+    material: ["Хлопковый канвас", "Около 280 г/м²"],
+    scales: [["Плотность", 78], ["Мягкость", 38]],
+    features: [
+      ["До 15 кг", "Усиленное крепление ручек"],
+      ["Большая зона печати", "Макет хорошо читается с расстояния"],
+      ["Гибкое производство", "Подберём размер и цвет под задачу"],
+    ],
+  },
+];
+
+const portfolioItems = [
+  {
+    title: "Тиражи футболок",
+    detail: "Шелкография · плотный хлопок",
+    image: "/portfolio-print-run.webp",
+    alt: "Проверка партии футболок со свежей шелкографией в печатной мастерской",
+  },
+  {
+    title: "Мерч для команды",
+    detail: "DTF-печать · единый стиль",
+    image: "/portfolio-event-team.webp",
+    alt: "Команда организаторов в футболках с одинаковым принтом на площадке мероприятия",
+  },
+  {
+    title: "Вышивка на спецодежде",
+    detail: "Машинная вышивка · точная детализация",
+    image: "/portfolio-embroidery.webp",
+    alt: "Вышивальная машина наносит красную эмблему на графитовую рабочую куртку",
+  },
+  {
+    title: "Шоперы для брендов",
+    detail: "Одноцветная печать · натуральный канвас",
+    image: "/portfolio-tote-run.webp",
+    alt: "Партия канвасовых шоперов с ботаническими принтами на столе контроля качества",
+  },
 ];
 
 const basePrices = [
-  { title: "Футболка", note: "Классическая модель из хлопка", price: 25, image: "/product-shirt.png" },
-  { title: "Худи", note: "Утеплённая модель с капюшоном", price: 65, image: "/product-hoodie.png" },
-  { title: "Кепка", note: "Классическая шестипанельная", price: 20, image: "/product-cap.png" },
-  { title: "Шопер", note: "Плотный натуральный хлопок", price: 18, image: "/product-shopper.png" },
+  { title: "Футболка", note: "Классическая модель из хлопка", price: PRODUCT_BASE_PRICES.shirt, image: "/product-shirt.webp" },
+  { title: "Худи", note: "Утеплённая модель с капюшоном", price: PRODUCT_BASE_PRICES.hoodie, image: "/product-hoodie.webp" },
+  { title: "Кепка", note: "Классическая шестипанельная", price: PRODUCT_BASE_PRICES.cap, image: "/product-cap.webp" },
+  { title: "Шопер", note: "Плотный натуральный хлопок", price: PRODUCT_BASE_PRICES.bag, image: "/product-shopper.webp" },
 ];
 
-const printPrices = [
-  { size: "A7", dimensions: "7,4 × 10,5 см", label: "маленький логотип", price: 5, scale: "xs" },
-  { size: "A6", dimensions: "10,5 × 14,8 см", label: "небольшой принт", price: 8, scale: "sm" },
-  { size: "A5", dimensions: "14,8 × 21,0 см", label: "компактный принт", price: 12, scale: "md" },
-  { size: "A4", dimensions: "21,0 × 29,7 см", label: "стандартный принт", price: 18, scale: "lg" },
-  { size: "A3", dimensions: "29,7 × 42,0 см", label: "крупный принт", price: 25, scale: "xl" },
-];
+const printPrices = PRINT_FORMATS.map((format) => ({
+  size: format.id,
+  dimensions: format.dimensions,
+  label: format.landingLabel,
+  price: DEFAULT_PRINT_METHOD_PRICE + format.add,
+  scale: format.scale,
+}));
 
 const faqs = [
   ["Можно заказать одну футболку?", "Да. Печатаем от одной штуки — без обязательного минимального тиража."],
@@ -55,7 +162,7 @@ const faqs = [
 ];
 
 function FormatShirtIcon({ scale, size }: { scale: string; size: string }) {
-  // Precision print area overlay coordinates on real studio photo /product-shirt.png (viewBox 100x100)
+  // Precision print area overlay coordinates on real studio photo /product-shirt.webp (viewBox 100x100)
   const printZones: Record<string, { x: number; y: number; width: number; height: number }> = {
     xs: { x: 32.5,  y: 28, width: 7.0,  height: 9.9 },  // A7 — left chest logo
     sm: { x: 45.05, y: 28, width: 9.9,  height: 14.0 }, // A6 — small front
@@ -67,7 +174,7 @@ function FormatShirtIcon({ scale, size }: { scale: string; size: string }) {
 
   return (
     <div className="format-photo-wrap">
-      <img src="/product-shirt.png" alt={`Белая футболка с зоной печати ${size}`} className="format-photo-img" />
+      <Image src="/product-shirt.webp" alt={`Белая футболка с зоной печати ${size}`} className="format-photo-img" width={1000} height={1000} sizes="122px" />
       <svg className="format-photo-svg" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
         <rect
           x={zone.x}
@@ -90,6 +197,7 @@ export default function Home() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [showMobileCta, setShowMobileCta] = useState(true);
   const [active, setActive] = useState("products");
+  const [catalogProduct, setCatalogProduct] = useState(0);
   const [priceProduct, setPriceProduct] = useState(0);
   const [priceFormat, setPriceFormat] = useState(3);
 
@@ -122,12 +230,13 @@ export default function Home() {
   }, []);
 
   const nav = [["products", "Продукция"], ["prices", "Цены"], ["works", "Примеры работ"], ["how-it-works", "Как заказать"], ["contacts", "Контакты"]];
+  const selectedCatalogProduct = products[catalogProduct];
 
   return (
     <main className="landing">
       <header className="lp-header">
         <a className="brand" href="#top" aria-label="Принтопус — на главную">
-          <img src="/logo.jpg" alt="Принтопус — центр печати на одежде" className="brand-logo-img" />
+          <Image src="/logo.webp" alt="" className="brand-logo-img" width={256} height={256} priority />
           <span className="brand-title"><b>ПРИНТОПУС</b><small>центр печати</small></span>
         </a>
 
@@ -165,7 +274,7 @@ export default function Home() {
           <a href="https://instagram.com/printservice_by" target="_blank" rel="noopener noreferrer" className="m-head-soc m-soc-ig" title="Instagram" aria-label="Instagram">
             <Icon name="instagram"/>
           </a>
-          <button className={`burger ${menuOpen ? "open" : ""}`} aria-label="Открыть меню" aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}>
+          <button className={`burger ${menuOpen ? "open" : ""}`} aria-label={menuOpen ? "Закрыть меню" : "Открыть меню"} aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}>
             <span/><span/><span/>
           </button>
         </div>
@@ -218,16 +327,77 @@ export default function Home() {
           </div>
           <a href="/configurator">Рассчитать свой макет <Icon name="arrow"/></a>
         </div>
-        <div className="lp-products">
-          {products.map((p) => (
-            <a href="/configurator" className={`lp-product ${p.kind}`} key={p.title}>
+        <div className="lp-products product-browser-grid">
+          {products.map((p, index) => (
+            <button
+              type="button"
+              className={`lp-product ${p.kind} ${catalogProduct === index ? "selected" : ""}`}
+              aria-pressed={catalogProduct === index}
+              onClick={() => setCatalogProduct(index)}
+              style={{ order: index * 2 }}
+              key={p.title}
+            >
               <div>
                 <h3>{p.title}</h3>
                 <p>{p.copy}</p>
+                <span>Подробнее <Icon name="arrow" /></span>
               </div>
-              <img className="product-photo" src={p.image} alt={p.title}/>
-            </a>
+              <Image className="product-photo" src={p.image} alt={p.title} fill sizes="(max-width: 760px) calc(100vw - 32px), (max-width: 1200px) 50vw, 25vw" />
+            </button>
           ))}
+          <div className="product-detail-panel" style={{ order: catalogProduct * 2 + 1 }} aria-live="polite">
+            <div className="product-detail-topline">
+              <div>
+                <small>Паспорт изделия</small>
+                <h3>{selectedCatalogProduct.title}</h3>
+              </div>
+              <p>Подберём основу и способ нанесения под макет, тираж и бюджет.</p>
+              <a className="button product-detail-cta" href="/configurator">
+                Открыть в конструкторе <Icon name="arrow" />
+              </a>
+            </div>
+
+            <div className="product-detail-grid">
+              <article>
+                <div className="product-detail-heading"><Icon name="card" /><h4>Способы нанесения</h4></div>
+                <div className="product-detail-list">
+                  {selectedCatalogProduct.methods.map(([title, description]) => (
+                    <div key={title}><b>{title}</b><span>{description}</span></div>
+                  ))}
+                </div>
+              </article>
+
+              <article>
+                <div className="product-detail-heading"><Icon name="shirt" /><h4>Посадка и размеры</h4></div>
+                <div className="product-check-list">
+                  {selectedCatalogProduct.fit.map((item) => <span key={item}>{item}</span>)}
+                </div>
+              </article>
+
+              <article>
+                <div className="product-detail-heading"><Icon name="box" /><h4>Материал</h4></div>
+                <b className="product-material-name">{selectedCatalogProduct.material[0]}</b>
+                <span className="product-material-note">{selectedCatalogProduct.material[1]}</span>
+                <div className="product-scales">
+                  {selectedCatalogProduct.scales.map(([label, value]) => (
+                    <div className="product-scale" key={label}>
+                      <div><b>{label}</b><span>{value}%</span></div>
+                      <i><span style={{ width: `${value}%` }} /></i>
+                    </div>
+                  ))}
+                </div>
+              </article>
+
+              <article>
+                <div className="product-detail-heading"><Icon name="shield" /><h4>Особенности</h4></div>
+                <div className="product-detail-list">
+                  {selectedCatalogProduct.features.map(([title, description]) => (
+                    <div key={title}><b>{title}</b><span>{description}</span></div>
+                  ))}
+                </div>
+              </article>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -236,11 +406,11 @@ export default function Home() {
           <div className="cost-heading">
             <p>Честная стоимость без скрытых наценок</p>
             <h2>Прозрачный расчёт цен</h2>
-            <span>Фиксированная стоимость изделия и нанесения. При заказе от 10 штук — оптовые скидки до -30%.</span>
+            <span>Единая стоимость изделия и нанесения. При заказе от {FIRST_VOLUME_DISCOUNT_QUANTITY} штук — оптовые скидки до -{MAX_VOLUME_DISCOUNT_PERCENT}%.</span>
           </div>
           <div className="cost-row cost-products-row">
             <div className="cost-side"><Icon name="shirt"/><b>Базовые изделия</b><span>Цена за изделие<br/>без нанесения.</span></div>
-            <div className="base-price-grid">{basePrices.map((item,index)=><button type="button" className={`base-price-card ${priceProduct===index?"selected":""}`} aria-pressed={priceProduct===index} onClick={()=>setPriceProduct(index)} key={item.title}><div><h3>{item.title}</h3><p>{item.note}</p><strong>{item.price} BYN</strong><small>без печати</small></div><img src={item.image} alt=""/></button>)}</div>
+            <div className="base-price-grid">{basePrices.map((item,index)=><button type="button" className={`base-price-card ${priceProduct===index?"selected":""}`} aria-pressed={priceProduct===index} onClick={()=>setPriceProduct(index)} key={item.title}><div><h3>{item.title}</h3><p>{item.note}</p><strong>{item.price} BYN</strong><small>без печати</small></div><Image src={item.image} alt="" fill sizes="(max-width: 760px) 50vw, 25vw"/></button>)}</div>
           </div>
           <div className="cost-row print-cost-row">
             <div className="cost-side"><Icon name="calculator"/><b>Стоимость печати</b><span>Выберите размер зоны<br/>нанесения на изделии.</span></div>
@@ -257,7 +427,7 @@ export default function Home() {
 
             <div className="cost-summary-body">
               <div className="cost-summary-line">
-                <img src={basePrices[priceProduct].image} alt="" className="cost-line-img" />
+                <Image src={basePrices[priceProduct].image} alt="" className="cost-line-img" width={1000} height={1000} sizes="64px" />
                 <div className="cost-line-text">
                   <small>Выбранное изделие</small>
                   <b>{basePrices[priceProduct].title}</b>
@@ -283,7 +453,7 @@ export default function Home() {
 
             <div className="cost-summary-footer">
               <div className="cost-total-group">
-                <small>Итоговая стоимость за 1 шт.</small>
+                <small>Предварительная стоимость за 1 шт. от</small>
                 <strong>{basePrices[priceProduct].price + printPrices[priceFormat].price} BYN</strong>
               </div>
               <a href="/configurator" className="button">
@@ -298,16 +468,26 @@ export default function Home() {
       <section className="lp-section works-section" id="works">
         <div className="lp-heading">
           <div>
-            <p>Наши реальные кейсы</p>
-            <h2>Галерея выполненных заказов</h2>
+            <p>Печать в деталях</p>
+            <h2>Так выглядит готовый тираж</h2>
           </div>
           <a href="/configurator">Заказать похожий тираж <Icon name="arrow"/></a>
         </div>
         <div className="portfolio-grid">
-          <article className="work-card work-a"><div><b>Корпоративная форма для бизнеса</b><span>Софтшелл куртки · 3D-вышивка · 48 шт.</span></div></article>
-          <article className="work-card work-b"><div><b>Мерч для команды мероприятия</b><span>Плотный хлопок 220g · DTF-печать · 150 шт.</span></div></article>
-          <article className="work-card work-c"><div><b>Брендовая коллекция худи</b><span>Оверсайз худи · вышивка + шелкография · 80 шт.</span></div></article>
-          <article className="work-card work-d"><div><b>Эко-шоперы для ритейла</b><span>Натуральный канвас · шелкотрафарет · 200 шт.</span></div></article>
+          {portfolioItems.map((item) => (
+            <article className="work-card" key={item.title}>
+              <Image
+                src={item.image}
+                alt={item.alt}
+                fill
+                sizes="(max-width: 760px) calc(100vw - 32px), (max-width: 1150px) 50vw, 58vw"
+              />
+              <div className="work-card-copy">
+                <b>{item.title}</b>
+                <span>{item.detail}</span>
+              </div>
+            </article>
+          ))}
         </div>
       </section>
 
@@ -361,7 +541,7 @@ export default function Home() {
           <h2>Посмотрите, как принт выглядит на одежде</h2>
           <span>Загрузите свой логотип, меняйте масштаб и расположение на модели в реальном времени. Рассчитайте точную стоимость за 1 минуту.</span>
         </div>
-        <div className="designer-visual"><img src="/portfolio-hoodies-real.png" alt="Готовый тираж худи с печатью"/></div>
+        <div className="designer-visual"><Image src="/portfolio-hoodies-real.webp" alt="Готовый тираж худи с печатью" fill sizes="(max-width: 760px) calc(100vw - 76px), 50vw"/></div>
         <a className="button light" href="/configurator">Открыть конструктор <Icon name="arrow"/></a>
       </section>
 
@@ -387,7 +567,7 @@ export default function Home() {
           <article><Icon name="clock"/><div><b>Режим работы</b><span>Пн–Пт: 9:00–18:00<br/>Сб–Вс: по записи</span></div></article>
           <article><Icon name="phone"/><div><b>Телефон</b><a href="tel:+375295552030">+375 (29) 555-20-30</a></div></article>
           <article><Icon name="telegram"/><div><b>Telegram</b><a href="https://t.me/printservice_by" target="_blank" rel="noopener noreferrer">@printservice_by</a></div></article>
-          <article><Icon name="instagram"/><div><b>Instagram</b><a href="https://instagram.com/printservice_by" target="_blank" rel="noopener noreferrer">@printservice.by</a></div></article>
+          <article><Icon name="instagram"/><div><b>Instagram</b><a href="https://instagram.com/printservice_by" target="_blank" rel="noopener noreferrer">@printservice_by</a></div></article>
           <article><Icon name="mail"/><div><b>E-mail</b><a href="mailto:info@printservice.by">info@printservice.by</a></div></article>
         </div>
         <div className="map-card" aria-label="Схема проезда">
@@ -407,7 +587,7 @@ export default function Home() {
       <footer className="lp-footer">
         <div>
           <a className="brand brand-invert" href="#top" style={{ gap: '12px' }}>
-            <img src="/logo.jpg" alt="Принтопус — центр печати на одежде" className="brand-logo-img" />
+            <Image src="/logo.webp" alt="" className="brand-logo-img" width={256} height={256} />
             <span className="brand-title"><b style={{ color: '#fff' }}>ПРИНТОПУС</b><small style={{ color: '#a5a8ae' }}>центр печати</small></span>
           </a>
           <p>Собственное производство в Минске<br/>и контроль качества на всех этапах.</p>
@@ -418,7 +598,7 @@ export default function Home() {
           <b>Контакты и соцсети</b>
           <a href="tel:+375295552030">+375 (29) 555-20-30</a>
           <a href="https://t.me/printservice_by" target="_blank" rel="noopener noreferrer">Telegram (@printservice_by)</a>
-          <a href="https://instagram.com/printservice_by" target="_blank" rel="noopener noreferrer">Instagram (@printservice.by)</a>
+          <a href="https://instagram.com/printservice_by" target="_blank" rel="noopener noreferrer">Instagram (@printservice_by)</a>
           <a href="mailto:info@printservice.by">info@printservice.by</a>
         </nav>
         <small>© 2026 Студия печати «Принтопус». Все права защищены.</small>

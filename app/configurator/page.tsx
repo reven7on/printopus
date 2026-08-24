@@ -2,13 +2,35 @@
 
 import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { useMemo, useRef, useState } from "react";
+import NextImage from "next/image";
 import Link from "next/link";
+import {
+  DEFAULT_PRINT_METHOD_PRICE,
+  getQuantityDiscount,
+  PRINT_FORMATS,
+  PRODUCT_BASE_PRICES,
+} from "../pricing";
+import { isValidBelarusianPhone } from "../order-validation";
+import { getAutomaticPrintEstimate } from "./editor-math";
 
 type ItemId = "shirt" | "hoodie" | "polo" | "cap" | "bag";
 type ViewAngle = "front" | "back" | "sleeve_left" | "sleeve_right";
 type PlacementId = "center" | "chest_left" | "back" | "sleeve_left" | "sleeve_right";
-type DesignerTool = "image" | "text";
-type DesignElementType = "image" | "text";
+type DesignerTool = "image" | "text" | "graphics";
+type DesignElementType = "image" | "text" | "shape";
+type TextAlignment = "left" | "center" | "right";
+type ContactMethod = "phone" | "telegram";
+type FulfillmentMethod = "pickup" | "delivery";
+type GraphicShapeId =
+  | "star" | "heart" | "line" | "triangle" | "circle" | "square" | "burst" | "sparkle" | "semicircle" | "arch" | "badge" | "diamond"
+  | "lightning" | "flame" | "crown" | "sun" | "moon" | "flower" | "leaf" | "mountain" | "rocket" | "coffee" | "headphones" | "camera"
+  | "music" | "gift" | "snowflake" | "planet" | "trophy" | "smile";
+
+type GraphicItem = {
+  id: GraphicShapeId;
+  label: string;
+  color: string;
+};
 
 type DesignElement = {
   id: string;
@@ -20,9 +42,15 @@ type DesignElement = {
   scale: number;
   rotation: number;
   width: number;
+  aspectRatio?: number;
   color?: string;
   fontFamily?: string;
   fontWeight?: 500 | 800;
+  fontStyle?: "normal" | "italic";
+  letterSpacing?: number;
+  textAlign?: TextAlignment;
+  outlined?: boolean;
+  curve?: number;
   quality?: "good" | "medium" | "low" | "vector";
 };
 
@@ -60,12 +88,107 @@ type PrintZone = {
 };
 
 const items = [
-  { id: "shirt", label: "Футболка", note: "100% хлопковый трикотаж", base: 15, icon: "shirt" },
-  { id: "hoodie", label: "Толстовка", note: "Утеплённый футер 320 г/м²", base: 45, icon: "hoodie" },
-  { id: "polo", label: "Поло", note: "Классическое пике 220 г/м²", base: 25, icon: "polo" },
-  { id: "cap", label: "Кепка", note: "6-панельная классическая", base: 12, icon: "cap" },
-  { id: "bag", label: "Шопер", note: "Плотный натуральный канвас", base: 10, icon: "bag" },
+  { id: "shirt", label: "Футболка", note: "100% хлопковый трикотаж", base: PRODUCT_BASE_PRICES.shirt, icon: "shirt" },
+  { id: "hoodie", label: "Толстовка", note: "Утеплённый футер 320 г/м²", base: PRODUCT_BASE_PRICES.hoodie, icon: "hoodie" },
+  { id: "polo", label: "Поло", note: "Классическое пике 220 г/м²", base: PRODUCT_BASE_PRICES.polo, icon: "polo" },
+  { id: "cap", label: "Кепка", note: "6-панельная классическая", base: PRODUCT_BASE_PRICES.cap, icon: "cap" },
+  { id: "bag", label: "Шопер", note: "Плотный натуральный канвас", base: PRODUCT_BASE_PRICES.bag, icon: "bag" },
 ] as const;
+
+const textFontOptions = [
+  { label: "Гротеск", value: "'Noto Sans', Arial, sans-serif" },
+  { label: "Антиква", value: "'Noto Serif Display', Georgia, serif" },
+  { label: "Моно", value: "'Iosevka Nerd Font Mono', 'Courier New', monospace" },
+  { label: "Узкий", value: "'Nimbus Sans Narrow', 'Arial Narrow', sans-serif" },
+  { label: "Рукописный", value: "Z003, 'Segoe Script', cursive" },
+] as const;
+
+const textColorOptions = [
+  { label: "Чёрный", value: "#111111" },
+  { label: "Белый", value: "#ffffff" },
+  { label: "Красный", value: "#ef101a" },
+  { label: "Бордовый", value: "#8b0038" },
+  { label: "Синий", value: "#1769e0" },
+  { label: "Тёмно-синий", value: "#17233a" },
+  { label: "Зелёный", value: "#138a4b" },
+  { label: "Жёлтый", value: "#ffc629" },
+  { label: "Оранжевый", value: "#f97316" },
+  { label: "Фиолетовый", value: "#7c3aed" },
+] as const;
+
+const graphicShapes: GraphicItem[] = [
+  { id: "star", label: "Звезда", color: "#111827" },
+  { id: "heart", label: "Сердце", color: "#ef101a" },
+  { id: "line", label: "Линия", color: "#111827" },
+  { id: "triangle", label: "Треугольник", color: "#1769e0" },
+  { id: "circle", label: "Круг", color: "#111827" },
+  { id: "square", label: "Квадрат", color: "#8b0038" },
+  { id: "burst", label: "Вспышка", color: "#f97316" },
+  { id: "sparkle", label: "Искра", color: "#ffc629" },
+  { id: "semicircle", label: "Полукруг", color: "#1769e0" },
+  { id: "arch", label: "Арка", color: "#111827" },
+  { id: "badge", label: "Значок", color: "#7c3aed" },
+  { id: "diamond", label: "Ромб", color: "#138a4b" },
+];
+
+const graphicClipart: GraphicItem[] = [
+  { id: "lightning", label: "Молния", color: "#ffc629" },
+  { id: "flame", label: "Пламя", color: "#ef101a" },
+  { id: "crown", label: "Корона", color: "#f59e0b" },
+  { id: "sun", label: "Солнце", color: "#f97316" },
+  { id: "moon", label: "Луна", color: "#7c3aed" },
+  { id: "flower", label: "Цветок", color: "#db2777" },
+  { id: "leaf", label: "Лист", color: "#138a4b" },
+  { id: "mountain", label: "Горы", color: "#17233a" },
+  { id: "rocket", label: "Ракета", color: "#1769e0" },
+  { id: "coffee", label: "Кофе", color: "#8b4513" },
+  { id: "headphones", label: "Наушники", color: "#111827" },
+  { id: "camera", label: "Камера", color: "#17233a" },
+  { id: "music", label: "Музыка", color: "#7c3aed" },
+  { id: "gift", label: "Подарок", color: "#ef101a" },
+  { id: "snowflake", label: "Снежинка", color: "#1769e0" },
+  { id: "planet", label: "Планета", color: "#7c3aed" },
+  { id: "trophy", label: "Кубок", color: "#f59e0b" },
+  { id: "smile", label: "Смайл", color: "#ffc629" },
+];
+
+const graphicCollections = [
+  { id: "shapes", label: "Формы", items: graphicShapes },
+  { id: "clipart", label: "Клипарт", items: graphicClipart },
+] as const;
+
+type TextPreset = {
+  id: string;
+  content: string;
+  label: string;
+  fontWeight: 500 | 800;
+  letterSpacing: number;
+  curve: number;
+  outlined: boolean;
+  fontStyle: "normal" | "italic";
+  fontFamily?: string;
+  color?: string;
+};
+
+const plainTextPreset: TextPreset = {
+  id: "plain",
+  content: "ВАШ ТЕКСТ",
+  label: "Свой текст",
+  fontWeight: 800,
+  letterSpacing: 0,
+  curve: 0,
+  outlined: false,
+  fontStyle: "normal",
+};
+
+const textPresets: TextPreset[] = [
+  { id: "team", content: "КОМАНДА", label: "Команда", fontWeight: 800, letterSpacing: 2, curve: 0, outlined: false, fontStyle: "normal", fontFamily: "'Nimbus Sans Narrow', 'Arial Narrow', sans-serif", color: "#ef101a" },
+  { id: "minsk", content: "MINSK", label: "Город", fontWeight: 500, letterSpacing: 5, curve: 0, outlined: false, fontStyle: "normal", fontFamily: "'Iosevka Nerd Font Mono', 'Courier New', monospace", color: "#17233a" },
+  { id: "love", content: "СДЕЛАНО С ЛЮБОВЬЮ", label: "С любовью", fontWeight: 800, letterSpacing: 1, curve: 55, outlined: false, fontStyle: "normal", fontFamily: "'Noto Serif Display', Georgia, serif", color: "#8b0038" },
+  { id: "outline", content: "YOUR IDEA", label: "Идея", fontWeight: 800, letterSpacing: 1, curve: 0, outlined: true, fontStyle: "normal", fontFamily: "'Noto Sans', Arial, sans-serif", color: "#111111" },
+  { id: "club", content: "КЛУБ 2026", label: "Клуб", fontWeight: 800, letterSpacing: 1, curve: -35, outlined: false, fontStyle: "italic", fontFamily: "'Noto Sans', Arial, sans-serif", color: "#1769e0" },
+  { id: "home", content: "ДОМА ЛУЧШЕ", label: "Дом", fontWeight: 800, letterSpacing: 1, curve: 0, outlined: false, fontStyle: "normal", fontFamily: "Z003, 'Segoe Script', cursive", color: "#138a4b" },
+];
 
 const garmentColors = [
   { id: "white", label: "Белый", hex: "#ffffff", border: "#e5e7eb", add: 0 },
@@ -101,18 +224,32 @@ const garmentSizeGuide = [
 ];
 
 const methods = {
-  dtf: { label: "DTF-печать", desc: "Яркие фото-принты от 1 шт. на любых тканях", add: 4 },
-  silk: { label: "Шелкография", desc: "Стойкая краска, выгодно при тираже от 30 шт.", add: 3 },
-  embroidery: { label: "Объёмная вышивка", desc: "Премиальный объёмный вид, не истирается", add: 6 },
+  dtf: {
+    label: "DTF-печать",
+    desc: "Для фотографий, градиентов и полноцветных макетов",
+    add: DEFAULT_PRINT_METHOD_PRICE,
+    icon: "image",
+    tags: ["От 1 шт.", "Любые цвета"],
+  },
+  silk: {
+    label: "Шелкография",
+    desc: "Стойкая печать простых макетов большими тиражами",
+    add: 3,
+    icon: "layers",
+    tags: ["От 30 шт.", "До 6 цветов"],
+  },
+  embroidery: {
+    label: "Вышивка",
+    desc: "Фактурное премиальное нанесение для логотипов и надписей",
+    add: 6,
+    icon: "target",
+    tags: ["Логотипы", "Максимальная стойкость"],
+  },
 };
 
-const printSizes = [
-  { id: "A7", label: "A7 (7,4 × 10,5 см)", note: "маленький логотип", add: 0 },
-  { id: "A6", label: "A6 (10,5 × 14,8 см)", note: "грудь / рукав", add: 2 },
-  { id: "A5", label: "A5 (14,8 × 21,0 см)", note: "компактный принт", add: 4 },
-  { id: "A4", label: "A4 (21,0 × 29,7 см)", note: "стандартный принт", add: 7 },
-  { id: "A3", label: "A3 (29,7 × 42,0 см)", note: "большой спинной принт", add: 11 },
-];
+const printSizes = PRINT_FORMATS;
+
+const quantityPresets = [1, 10, 20, 50, 100, 200] as const;
 
 const placements = [
   { id: "center", label: "Спереди по центру", sub: "Классическая зона на груди", view: "front" },
@@ -154,6 +291,38 @@ const printZones: Record<ItemId, Partial<Record<ViewAngle, PrintZone>>> = {
   },
 };
 
+// Approximate production dimensions of each editable zone in centimeters.
+// They let the quote infer an ISO print format from the customer's actual layout.
+const printZoneDimensionsCm: Record<ItemId, Partial<Record<ViewAngle, { width: number; height: number }>>> = {
+  shirt: {
+    front: { width: 33, height: 40 },
+    back: { width: 33, height: 40 },
+    sleeve_left: { width: 10, height: 11 },
+    sleeve_right: { width: 10, height: 11 },
+  },
+  hoodie: {
+    front: { width: 35, height: 30 },
+    back: { width: 35, height: 44 },
+    sleeve_left: { width: 9, height: 37 },
+    sleeve_right: { width: 9, height: 37 },
+  },
+  polo: {
+    front: { width: 35, height: 45 },
+    back: { width: 35, height: 45 },
+    sleeve_left: { width: 9.5, height: 9.5 },
+    sleeve_right: { width: 9.5, height: 9.5 },
+  },
+  cap: {
+    front: { width: 12.7, height: 5 },
+    sleeve_left: { width: 6.5, height: 5 },
+    sleeve_right: { width: 6.5, height: 5 },
+  },
+  bag: {
+    front: { width: 25, height: 30 },
+    back: { width: 25, height: 30 },
+  },
+};
+
 const placementIdsByItem: Record<ItemId, readonly PlacementId[]> = {
   shirt: ["center", "chest_left", "back", "sleeve_left", "sleeve_right"],
   hoodie: ["center", "chest_left", "back", "sleeve_left", "sleeve_right"],
@@ -175,6 +344,16 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
+function getContrastingOutlineColor(color?: string) {
+  const hex = color?.replace("#", "");
+  if (!hex || !/^[0-9a-f]{6}$/i.test(hex)) return "#ffffff";
+  const red = Number.parseInt(hex.slice(0, 2), 16);
+  const green = Number.parseInt(hex.slice(2, 4), 16);
+  const blue = Number.parseInt(hex.slice(4, 6), 16);
+  const luminance = (red * 0.299 + green * 0.587 + blue * 0.114) / 255;
+  return luminance > 0.62 ? "#111111" : "#ffffff";
+}
+
 function getInitialElementPosition(placementId: PlacementId) {
   if (placementId === "chest_left") return { x: 76, y: 20, scale: 0.58 };
   return { x: 50, y: 46, scale: 1 };
@@ -193,6 +372,44 @@ function getPrintZoneStyle(zone: PrintZone): CSSProperties {
   };
 }
 
+function getInitialImageWidth(zone: PrintZone, naturalWidth: number, naturalHeight: number) {
+  const safeWidth = naturalWidth > 0 ? naturalWidth : 1;
+  const safeHeight = naturalHeight > 0 ? naturalHeight : 1;
+  const imageAspectRatio = safeWidth / safeHeight;
+  const maxWidthPercent = 76;
+  const maxHeightPercent = 72;
+  const widthLimitedByHeight = maxHeightPercent * (zone.height / zone.width) * imageAspectRatio;
+
+  return +clamp(Math.min(maxWidthPercent, widthLimitedByHeight), 3, maxWidthPercent).toFixed(2);
+}
+
+function getPrintZoneControlScale(zone: PrintZone) {
+  const shortestZoneSide = Math.min(zone.width, zone.height) / zone.canvas;
+  return +clamp(shortestZoneSide / 0.28, 0.7, 1).toFixed(2);
+}
+
+function getElementControlScale(zone: PrintZone, element: DesignElement, zoomed: boolean) {
+  const workspaceScale = zoomed ? getWorkspaceScale(zone) : 1;
+  return getPrintZoneControlScale(zone) / (element.scale * workspaceScale);
+}
+
+function getResizeHandleStyle(zone: PrintZone, element: DesignElement, zoomed: boolean): CSSProperties {
+  const scale = getElementControlScale(zone, element, zoomed);
+  return {
+    right: `${-8 * scale}px`,
+    bottom: `${-8 * scale}px`,
+    transform: `scale(${scale})`,
+  };
+}
+
+function getRotateHandleStyle(zone: PrintZone, element: DesignElement, zoomed: boolean): CSSProperties {
+  const scale = getElementControlScale(zone, element, zoomed);
+  return {
+    bottom: `${-46 * scale}px`,
+    transform: `translateX(-50%) scale(${scale})`,
+  };
+}
+
 function getElementToolbarStyle(zone: PrintZone, element: DesignElement, zoomed: boolean): CSSProperties {
   const zoneLeft = (zone.x / zone.canvas) * 100;
   const zoneTop = (zone.y / zone.canvas) * 100;
@@ -203,7 +420,7 @@ function getElementToolbarStyle(zone: PrintZone, element: DesignElement, zoomed:
   const workspaceScale = zoomed ? getWorkspaceScale(zone) : 1;
   const elementCenterX = zoneLeft + zoneWidth * (element.x / 100);
   const elementCenterY = zoneTop + zoneHeight * (element.y / 100);
-  const imageHalfSize = element.type === "image"
+  const imageHalfSize = element.type !== "text"
     ? zoneWidth * (element.width / 100) * element.scale * 0.5
     : 4;
   const focusedCenterX = focusOriginX + (elementCenterX - focusOriginX) * workspaceScale;
@@ -212,6 +429,8 @@ function getElementToolbarStyle(zone: PrintZone, element: DesignElement, zoomed:
   return {
     left: `${clamp(focusedCenterX, 25, 75)}%`,
     top: `${clamp(focusedCenterY - imageHalfSize * workspaceScale - 2, 12, 88)}%`,
+    transform: `translate(-50%, calc(-100% - 8px)) scale(${getPrintZoneControlScale(zone)})`,
+    transformOrigin: "center bottom",
   };
 }
 
@@ -256,8 +475,8 @@ const steps = [
   { n: 1, title: "Изделие", note: "Тип одежды", icon: "shirt" },
   { n: 2, title: "Параметры", note: "Цвет и размер", icon: "target" },
   { n: 3, title: "Макет", note: "Логотип и позиция", icon: "upload" },
-  { n: 4, title: "Тираж", note: "Метод и количество", icon: "layers" },
-  { n: 5, title: "Заказ", note: "Сводка и отправка", icon: "clipboard" },
+  { n: 4, title: "Печать", note: "Метод и тираж", icon: "layers" },
+  { n: 5, title: "Оформление", note: "Контакты и получение", icon: "clipboard" },
 ];
 
 function ConfigIcon({ name, size = 24 }: { name: string; size?: number }) {
@@ -277,21 +496,75 @@ function ConfigIcon({ name, size = 24 }: { name: string; size?: number }) {
     trash: <><path d="M5 7h14M9 7V4h6v3m2 0-1 14H8L7 7m4 4v6m3-6v6"/></>,
     image: <><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9" r="1.5"/><path d="m4 17 5-5 4 4 2-2 5 4"/></>,
     type: <><path d="M5 5h14M12 5v14M8 19h8"/></>,
+    shapes: <><circle cx="8" cy="8" r="4"/><path d="m15 4 6 10H9Z"/><rect x="4" y="15" width="7" height="7" rx="1"/></>,
     move: <><path d="M12 2v20m0-20-3 3m3-3 3 3M12 22l-3-3m3 3 3-3M2 12h20M2 12l3-3m-3 3 3 3m17-3-3-3m3 3-3 3"/></>,
     undo: <><path d="M9 7 4 12l5 5"/><path d="M5 12h8a6 6 0 0 1 6 6"/></>,
     redo: <><path d="m15 7 5 5-5 5"/><path d="M19 12h-8a6 6 0 0 0-6 6"/></>,
     minus: <path d="M5 12h14"/>,
     plus: <path d="M12 5v14M5 12h14"/>,
     bold: <><path d="M8 5h5a3 3 0 0 1 0 6H8Zm0 6h6a4 4 0 0 1 0 8H8Z"/></>,
+    italic: <><path d="M10 5h8M6 19h8M14 5 10 19"/></>,
+    alignLeft: <path d="M4 6h16M4 10h11M4 14h16M4 18h9"/>,
+    alignCenter: <path d="M4 6h16M7 10h10M4 14h16M8 18h8"/>,
+    alignRight: <path d="M4 6h16M9 10h11M4 14h16M11 18h9"/>,
+    edit: <><path d="M4 20h4l11-11-4-4L4 16Z"/><path d="m13.5 6.5 4 4"/></>,
+    curve: <><path d="M4 16c4-8 12-8 16 0"/><path d="M7 15v4m10-4v4"/></>,
+    copy: <><rect x="8" y="8" width="11" height="11" rx="1"/><path d="M16 8V5H5v11h3"/></>,
+    more: <><circle cx="5" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1" fill="currentColor" stroke="none"/></>,
     warning: <><path d="M12 3 2.5 20h19Z"/><path d="M12 9v4m0 3h.01"/></>,
     check: <path d="m5 12 4 4L19 6"/>,
     arrowRight: <path d="M5 12h14m-5-5 5 5-5 5"/>,
     arrowLeft: <path d="M19 12H5m5-5-5 5 5 5"/>,
     chevronRight: <path d="m9 5 7 7-7 7"/>,
     chevronLeft: <path d="m15 5-7 7 7 7"/>,
+    chevronDown: <path d="m5 9 7 7 7-7"/>,
     phone: <path d="M6 3h4l2 5-3 2c2 4 4 6 8 8l2-3 4 2v4c-1 2-4 2-6 1C9 19 4 14 2 7 1 5 3 3 6 3Z"/>,
+    message: <><path d="M4 5h16v12H8l-4 4Z"/><path d="M8 9h8M8 13h5"/></>,
+    pin: <><path d="M20 10c0 5-8 12-8 12S4 15 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/></>,
+    truck: <><path d="M3 6h11v11H3Z"/><path d="M14 10h4l3 3v4h-7Z"/><circle cx="7" cy="18" r="2"/><circle cx="18" cy="18" r="2"/></>,
   };
   return <svg className="config-icon" style={{ width: size, height: size }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{shapes[name]}</svg>;
+}
+
+function GraphicShape({ id, className }: { id: GraphicShapeId; className?: string }) {
+  const shapes: Record<GraphicShapeId, ReactNode> = {
+    star: <polygon points="50,4 61,36 96,36 68,56 79,90 50,70 21,90 32,56 4,36 39,36" />,
+    heart: <path d="M50 88 12 52C-8 31 5 7 28 10c10 1 17 7 22 15 5-8 12-14 22-15 23-3 36 21 16 42Z" />,
+    line: <rect x="5" y="45" width="90" height="10" rx="2" />,
+    triangle: <polygon points="50,7 96,91 4,91" />,
+    circle: <circle cx="50" cy="50" r="44" />,
+    square: <rect x="7" y="7" width="86" height="86" />,
+    burst: <polygon points="50,2 58,31 78,11 69,39 98,32 73,49 98,61 68,59 78,89 57,68 50,98 42,68 21,89 31,59 2,61 27,49 2,32 31,39 21,11 42,31" />,
+    sparkle: <path d="M50 2c4 29 12 39 42 48-30 9-38 19-42 48-4-29-12-39-42-48C38 41 46 31 50 2Z" />,
+    semicircle: <path d="M6 84a44 44 0 0 1 88 0Z" />,
+    arch: <path fillRule="evenodd" d="M6 88a44 44 0 0 1 88 0H76a26 26 0 0 0-52 0Z" />,
+    badge: <polygon points="50,2 63,16 82,15 84,34 98,50 84,66 82,85 63,84 50,98 37,84 18,85 16,66 2,50 16,34 18,15 37,16" />,
+    diamond: <polygon points="50,4 94,50 50,96 6,50" />,
+    lightning: <polygon points="57,2 17,57 44,57 35,98 84,40 57,40" />,
+    flame: <path d="M52 3c8 20-8 25 1 42 8-10 12-17 10-27 18 16 29 35 23 55-5 17-19 25-36 25S18 88 14 71c-4-18 6-35 22-49-1 15 3 23 11 29 2-16-6-27 5-48Z" />,
+    crown: <><path d="m8 25 22 19 20-31 20 31 22-19-10 55H18Z"/><rect x="19" y="84" width="62" height="10" rx="3"/></>,
+    sun: <><circle cx="50" cy="50" r="23"/><path d="M50 3v16m0 62v16M3 50h16m62 0h16M17 17l12 12m42 42 12 12m0-66L71 29M29 71 17 83" fill="none" stroke="currentColor" strokeWidth="8" strokeLinecap="round"/></>,
+    moon: <path d="M72 9a42 42 0 1 0 17 70A36 36 0 0 1 72 9Z" />,
+    flower: <><circle cx="50" cy="50" r="14"/><circle cx="50" cy="20" r="18" opacity=".78"/><circle cx="79" cy="41" r="18" opacity=".78"/><circle cx="68" cy="76" r="18" opacity=".78"/><circle cx="32" cy="76" r="18" opacity=".78"/><circle cx="21" cy="41" r="18" opacity=".78"/></>,
+    leaf: <><path d="M91 10C50 11 17 27 10 66c-4 22 18 30 36 19 26-16 36-44 45-75Z"/><path d="M18 84c17-24 37-42 62-59" fill="none" stroke="white" strokeOpacity=".6" strokeWidth="5" strokeLinecap="round"/></>,
+    mountain: <><polygon points="3,88 36,29 54,59 66,42 97,88"/><polygon points="27,45 36,29 46,46 39,43 35,49" fill="white" opacity=".65"/><circle cx="76" cy="21" r="10" opacity=".35"/></>,
+    rocket: <><path d="M54 5c25 18 31 45 17 66L51 91 29 69C17 48 28 20 54 5Z"/><circle cx="52" cy="42" r="10" fill="white" opacity=".7"/><path d="m33 65-19 6 14-23m40 17 18 7-13-24M42 83l9 15 10-16" opacity=".6"/></>,
+    coffee: <><path d="M15 28h58v42c0 15-12 25-29 25S15 85 15 70Z"/><path d="M72 38h9c18 0 18 28 0 28h-9" fill="none" stroke="currentColor" strokeWidth="9"/><path d="M31 7c-7 9 7 11 0 20M50 7c-7 9 7 11 0 20" fill="none" stroke="currentColor" strokeWidth="5" strokeLinecap="round" opacity=".65"/></>,
+    headphones: <><path d="M12 53a38 38 0 0 1 76 0v29H73V54a23 23 0 0 0-46 0v28H12Z"/><rect x="5" y="54" width="22" height="34" rx="8"/><rect x="73" y="54" width="22" height="34" rx="8"/></>,
+    camera: <><rect x="6" y="25" width="88" height="65" rx="9"/><path d="m28 25 8-14h28l8 14"/><circle cx="50" cy="57" r="22" fill="white" opacity=".72"/><circle cx="50" cy="57" r="13"/><circle cx="81" cy="38" r="5" fill="white" opacity=".72"/></>,
+    music: <><path d="M39 18v56c0 11-9 20-22 20-10 0-16-6-16-14 0-10 9-18 21-18 4 0 8 1 11 3V8l61-7v55c0 11-9 20-22 20-10 0-16-6-16-14 0-10 9-18 21-18 4 0 8 1 11 3V15Z"/></>,
+    gift: <><rect x="9" y="37" width="82" height="56" rx="4"/><rect x="4" y="25" width="92" height="22" rx="4" opacity=".8"/><rect x="44" y="25" width="12" height="68" fill="white" opacity=".65"/><path d="M50 25C29 25 18 18 22 8c5-13 25 4 28 17Zm0 0c21 0 32-7 28-17-5-13-25 4-28 17Z"/></>,
+    snowflake: <path d="M50 3v94M9 27l82 46M9 73l82-46M50 3 39 15m11-12 11 12M50 97 39 85m11 12 11-12M9 27l16 3M9 27l6 15m76 31-16-3m16 3-6-15M9 73l16-3M9 73l6-15m76-31-16 3m16-3-6 15" fill="none" stroke="currentColor" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/>,
+    planet: <><circle cx="51" cy="50" r="29"/><path d="M7 66c11 10 40 4 61-8 21-12 32-27 25-35-5-6-17-4-28 1" fill="none" stroke="currentColor" strokeWidth="8" strokeLinecap="round"/><circle cx="43" cy="41" r="7" fill="white" opacity=".35"/></>,
+    trophy: <><path d="M28 7h44v25c0 23-12 34-22 34S28 55 28 32Z"/><path d="M28 17H8v12c0 16 10 25 25 25M72 17h20v12c0 16-10 25-25 25" fill="none" stroke="currentColor" strokeWidth="8"/><rect x="44" y="63" width="12" height="20"/><rect x="25" y="82" width="50" height="13" rx="3"/></>,
+    smile: <><circle cx="50" cy="50" r="45"/><circle cx="35" cy="41" r="6" fill="#111827"/><circle cx="65" cy="41" r="6" fill="#111827"/><path d="M27 60c7 19 39 19 46 0" fill="none" stroke="#111827" strokeWidth="7" strokeLinecap="round"/></>,
+  };
+
+  return (
+    <svg className={className} style={{ display: "block", width: "100%", height: "100%", pointerEvents: "none" }} viewBox="0 0 100 100" fill="currentColor" aria-hidden="true">
+      {shapes[id]}
+    </svg>
+  );
 }
 
 function getMockupPath(itemKey: ItemId, colorKey: string, viewAngleKey: ViewAngle) {
@@ -340,17 +613,14 @@ export default function Configurator() {
   const [viewAngle, setViewAngle] = useState<ViewAngle>("front");
   const [method, setMethod] = useState<keyof typeof methods>("dtf");
   const [placement, setPlacement] = useState<PlacementId>("center");
-  const [sizeFormat, setSizeFormat] = useState("A4");
   const [qty, setQty] = useState(30);
   
   const [fileError, setFileError] = useState("");
   const [designs, setDesigns] = useState<DesignsByView>(createEmptyDesigns);
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
   const [activeDesignerTool, setActiveDesignerTool] = useState<DesignerTool>("image");
-  const [textValue, setTextValue] = useState("Ваш текст");
-  const [textColor, setTextColor] = useState("#111111");
-  const [textFont, setTextFont] = useState("Arial, sans-serif");
-  const [textBold, setTextBold] = useState(true);
+  const [textFont, setTextFont] = useState<string>(textFontOptions[0].value);
+  const [quickTextPanel, setQuickTextPanel] = useState<"font" | "color" | "curve" | "more" | null>(null);
   const [mobileDesignPanelOpen, setMobileDesignPanelOpen] = useState(false);
   const [workspaceZoomed, setWorkspaceZoomed] = useState(false);
   const [historyAvailability, setHistoryAvailability] = useState({ undo: 0, redo: 0 });
@@ -358,20 +628,29 @@ export default function Configurator() {
 
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
+  const [phoneError, setPhoneError] = useState("");
   const [customerComment, setCustomerComment] = useState("");
+  const [contactMethod, setContactMethod] = useState<ContactMethod>("phone");
+  const [fulfillmentMethod, setFulfillmentMethod] = useState<FulfillmentMethod>("pickup");
+  const [deliveryAddress, setDeliveryAddress] = useState("");
   const [submitted, setSubmitted] = useState(false);
   const [orderId, setOrderId] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const historyRef = useRef<DesignsByView[]>([]);
   const redoRef = useRef<DesignsByView[]>([]);
   const transformGestureRef = useRef<TransformGesture | null>(null);
+  const quickTextEditBeforeRef = useRef<DesignsByView | null>(null);
   const nextElementIdRef = useRef(0);
 
   const selectedItem = items.find((i) => i.id === item)!;
   const selectedColor = garmentColors.find((c) => c.id === color)!;
   const availableGarmentSizes = garmentSizesByItem[item];
   const selectedGarmentSize = availableGarmentSizes.find((size) => size.id === garmentSize) ?? availableGarmentSizes[0];
-  const selectedSize = printSizes.find((s) => s.id === sizeFormat)!;
+  const printEstimate = useMemo(
+    () => getAutomaticPrintEstimate(designs, item, printZoneDimensionsCm, printSizes),
+    [designs, item],
+  );
+  const selectedSize = printEstimate.size;
   const selectedPlacement = placements.find((p) => p.id === placement)!;
   const activeStep = steps.find((s) => s.n === currentStep)!;
   const availablePlacements = getAvailablePlacementsForItem(item);
@@ -393,6 +672,17 @@ export default function Configurator() {
     ? currentPrintZone.width / currentPrintZone.canvas < 0.2 || currentPrintZone.height / currentPrintZone.canvas < 0.2
     : false;
   const designElementsCount = Object.values(designs).reduce((total, elements) => total + elements.length, 0);
+  const discount = getQuantityDiscount(qty);
+  const hasRasterArtwork = Object.values(designs).some((elements) => (
+    elements.some((element) => element.type === "image" && element.quality !== "vector")
+  ));
+  const recommendedMethod: keyof typeof methods = item === "cap" && designElementsCount > 0 && !hasRasterArtwork
+    ? "embroidery"
+    : hasRasterArtwork
+      ? "dtf"
+      : qty >= 30
+        ? "silk"
+        : "dtf";
 
   // Authentic Spreadshirt PNG mockups mapped per product, color & view
   const currentMockupImage = useMemo(() => {
@@ -401,8 +691,7 @@ export default function Configurator() {
 
   const unitPrice = useMemo(() => {
     const baseUnit = selectedItem.base + selectedColor.add + methods[method].add + selectedSize.add;
-    const discountMultiplier = qty >= 200 ? 0.76 : qty >= 100 ? 0.82 : qty >= 50 ? 0.89 : qty >= 20 ? 0.95 : 1;
-    return +(baseUnit * discountMultiplier).toFixed(2);
+    return +(baseUnit * getQuantityDiscount(qty).multiplier).toFixed(2);
   }, [selectedItem, selectedColor, method, selectedSize, qty]);
 
   const totalPrice = +(unitPrice * qty).toFixed(2);
@@ -414,8 +703,15 @@ export default function Configurator() {
     setHistoryAvailability({ undo: historyRef.current.length, redo: 0 });
   }
 
-  function addImageElement(source: string, sourceFile: File, quality: DesignElement["quality"]) {
+  function addImageElement(
+    source: string,
+    sourceFile: File,
+    quality: DesignElement["quality"],
+    naturalWidth: number,
+    naturalHeight: number,
+  ) {
     const initial = getInitialElementPosition(placement);
+    const zone = getPrintZone(item, viewAngle);
     nextElementIdRef.current += 1;
     const newElement: DesignElement = {
       id: `image-${nextElementIdRef.current}`,
@@ -426,7 +722,8 @@ export default function Configurator() {
       y: initial.y,
       scale: initial.scale,
       rotation: 0,
-      width: 76,
+      width: zone ? getInitialImageWidth(zone, naturalWidth, naturalHeight) : 60,
+      aspectRatio: naturalWidth > 0 && naturalHeight > 0 ? naturalWidth / naturalHeight : 1,
       quality,
     };
     commitDesigns({ ...designs, [viewAngle]: [...designs[viewAngle], newElement] });
@@ -460,15 +757,17 @@ export default function Configurator() {
     };
     reader.onload = () => {
       const source = String(reader.result);
-      if (extension === "svg") {
-        addImageElement(source, file, "vector");
-        return;
-      }
       const image = new Image();
       image.onload = () => {
         const shortestSide = Math.min(image.naturalWidth, image.naturalHeight);
-        const quality: DesignElement["quality"] = shortestSide >= 1200 ? "good" : shortestSide >= 700 ? "medium" : "low";
-        addImageElement(source, file, quality);
+        const quality: DesignElement["quality"] = extension === "svg"
+          ? "vector"
+          : shortestSide >= 1200
+            ? "good"
+            : shortestSide >= 700
+              ? "medium"
+              : "low";
+        addImageElement(source, file, quality, image.naturalWidth, image.naturalHeight);
       };
       image.onerror = () => {
         setFileError("Изображение повреждено или не поддерживается.");
@@ -503,50 +802,117 @@ export default function Configurator() {
     if (nextViewElements.length === 0) setWorkspaceZoomed(false);
   }
 
-  function addOrUpdateText() {
-    const cleanText = textValue.trim();
-    if (!cleanText) return;
-    if (selectedElement?.type === "text") {
-      updateSelectedElement({
-        content: cleanText,
-        name: cleanText,
-        color: textColor,
-        fontFamily: textFont,
-        fontWeight: textBold ? 800 : 500,
-      });
-      return;
-    }
-
+  function addTextPreset(preset: TextPreset) {
     const initial = getInitialElementPosition(placement);
     nextElementIdRef.current += 1;
     const newElement: DesignElement = {
       id: `text-${nextElementIdRef.current}`,
       type: "text",
-      content: cleanText,
-      name: cleanText,
+      content: preset.content,
+      name: preset.content,
       x: initial.x,
       y: initial.y,
       scale: initial.scale,
       rotation: 0,
       width: 70,
-      color: textColor,
-      fontFamily: textFont,
-      fontWeight: textBold ? 800 : 500,
+      color: preset.color ?? "#111111",
+      fontFamily: preset.fontFamily ?? textFont,
+      fontWeight: preset.fontWeight,
+      fontStyle: preset.fontStyle,
+      letterSpacing: preset.letterSpacing,
+      textAlign: "center",
+      outlined: preset.outlined,
+      curve: preset.curve,
     };
     commitDesigns({ ...designs, [viewAngle]: [...designs[viewAngle], newElement] });
     setSelectedElementId(newElement.id);
+    setQuickTextPanel(null);
     setWorkspaceZoomed(true);
+    setMobileDesignPanelOpen(false);
+  }
+
+  function addPlainText() {
+    addTextPreset(plainTextPreset);
+  }
+
+  function addGraphic(shape: GraphicItem) {
+    const initial = getInitialElementPosition(placement);
+    nextElementIdRef.current += 1;
+    const newElement: DesignElement = {
+      id: `shape-${nextElementIdRef.current}`,
+      type: "shape",
+      content: shape.id,
+      name: shape.label,
+      x: initial.x,
+      y: initial.y,
+      scale: initial.scale,
+      rotation: 0,
+      width: 54,
+      color: shape.color,
+      quality: "vector",
+    };
+    commitDesigns({ ...designs, [viewAngle]: [...designs[viewAngle], newElement] });
+    setSelectedElementId(newElement.id);
+    setQuickTextPanel(null);
+    setWorkspaceZoomed(true);
+    setMobileDesignPanelOpen(false);
   }
 
   function selectDesignElement(element: DesignElement) {
     setSelectedElementId(element.id);
-    setActiveDesignerTool(element.type);
-    if (element.type === "text") {
-      setTextValue(element.content);
-      setTextColor(element.color ?? "#111111");
-      setTextFont(element.fontFamily ?? "Arial, sans-serif");
-      setTextBold(element.fontWeight === 800);
+    setActiveDesignerTool(element.type === "shape" ? "graphics" : element.type);
+    setQuickTextPanel(null);
+  }
+
+  function updateSelectedTextQuick(patch: Partial<DesignElement>) {
+    if (selectedElement?.type !== "text") return;
+    updateSelectedElement(patch);
+  }
+
+  function beginQuickTextEdit() {
+    if (selectedElement?.type !== "text") return;
+    quickTextEditBeforeRef.current = designs;
+  }
+
+  function updateQuickTextContent(content: string) {
+    if (selectedElement?.type !== "text") return;
+    updateElementLive(viewAngle, selectedElement.id, { content, name: content || "Текст" });
+  }
+
+  function finishQuickTextEdit() {
+    if (selectedElement?.type !== "text") return;
+    const before = quickTextEditBeforeRef.current;
+    quickTextEditBeforeRef.current = null;
+    const cleanText = selectedElement.content.trim() || "Текст";
+    if (cleanText !== selectedElement.content) {
+      updateElementLive(viewAngle, selectedElement.id, { content: cleanText, name: cleanText });
     }
+    const previousElement = before?.[viewAngle].find((element) => element.id === selectedElement.id);
+    if (!before || previousElement?.content === cleanText) return;
+    historyRef.current = [...historyRef.current.slice(-29), before];
+    redoRef.current = [];
+    setHistoryAvailability({ undo: historyRef.current.length, redo: 0 });
+  }
+
+  function duplicateSelectedElement() {
+    if (!selectedElement) return;
+    nextElementIdRef.current += 1;
+    const copy: DesignElement = {
+      ...selectedElement,
+      id: `${selectedElement.type}-${nextElementIdRef.current}`,
+      name: `${selectedElement.name} копия`,
+      x: clamp(selectedElement.x + 6, 8, 92),
+      y: clamp(selectedElement.y + 6, 8, 92),
+    };
+    commitDesigns({ ...designs, [viewAngle]: [...designs[viewAngle], copy] });
+    setSelectedElementId(copy.id);
+  }
+
+  function cycleSelectedTextAlignment() {
+    if (selectedElement?.type !== "text") return;
+    const currentAlignment = selectedElement.textAlign ?? "center";
+    const nextAlignment: Record<TextAlignment, TextAlignment> = { left: "center", center: "right", right: "left" };
+    updateSelectedTextQuick({ textAlign: nextAlignment[currentAlignment] });
   }
 
   function undoDesignChange() {
@@ -711,10 +1077,42 @@ export default function Configurator() {
 
   function handleSubmitOrder(e?: React.SyntheticEvent) {
     if (e) e.preventDefault();
-    if (!customerPhone.trim()) return;
+    if (!customerName.trim()) return;
+    if (!isValidBelarusianPhone(customerPhone)) {
+      setPhoneError("Введите белорусский номер в формате +375 (29) 000-00-00.");
+      return;
+    }
+    if (fulfillmentMethod === "delivery" && !deliveryAddress.trim()) return;
+    setPhoneError("");
     const randomId = "BY-" + Math.floor(100000 + Math.random() * 900000);
     setOrderId(randomId);
     setSubmitted(true);
+  }
+
+  function startNewOrder() {
+    setSubmitted(false);
+    setCurrentStep(1);
+    setItem("shirt");
+    setColor("khaki");
+    setGarmentSize("M");
+    setViewAngle("front");
+    setMethod("dtf");
+    setPlacement("center");
+    setQty(30);
+    setDesigns(createEmptyDesigns());
+    setSelectedElementId(null);
+    setWorkspaceZoomed(false);
+    setCustomerName("");
+    setCustomerPhone("");
+    setPhoneError("");
+    setCustomerComment("");
+    setContactMethod("phone");
+    setFulfillmentMethod("pickup");
+    setDeliveryAddress("");
+    setOrderId("");
+    historyRef.current = [];
+    redoRef.current = [];
+    setHistoryAvailability({ undo: 0, redo: 0 });
   }
 
   function handleSelectViewAngle(angle: ViewAngle) {
@@ -743,13 +1141,19 @@ export default function Configurator() {
     setCurrentStep((step) => Math.min(5, step + 1));
   }
 
+  function toggleMobileDesignPanel() {
+    const nextOpen = !mobileDesignPanelOpen;
+    if (nextOpen && selectedElement) selectDesignElement(selectedElement);
+    setMobileDesignPanelOpen(nextOpen);
+  }
+
   return (
     <main className={`config-wizard-page current-step-${currentStep} ${submitted ? "is-submitted" : ""}`}>
       {/* Header */}
       <header className="config-nav-header">
         <div className="config-header-container">
-          <Link className="brand" href="/" style={{ gap: '10px' }}>
-            <img src="/logo.jpg" alt="Принтопус — центр печати на одежде" className="brand-logo-img" />
+          <Link className="brand" href="/" style={{ gap: '10px' }} aria-label="Принтопус — вернуться на главную">
+            <NextImage src="/logo.webp" alt="" className="brand-logo-img" width={256} height={256} priority />
             <span className="brand-title"><b>ПРИНТОПУС</b><small>центр печати</small></span>
           </Link>
           <div className="config-header-right">
@@ -757,7 +1161,10 @@ export default function Configurator() {
               <ConfigIcon name="phone" size={16} />
               <span>+375 (29) 555-20-30</span>
             </a>
-            <Link href="/" className="button button-small outline">На главную</Link>
+            <Link href="/" className="button button-small outline config-home-link">
+              <ConfigIcon name="arrowLeft" size={16} />
+              <span>На главную</span>
+            </Link>
           </div>
         </div>
       </header>
@@ -776,9 +1183,12 @@ export default function Configurator() {
       </div>
 
       {/* Main Wizard Area */}
-      <div className={`config-wizard-body step-${currentStep} ${currentStep === 1 ? "catalog-mode" : ""} ${currentStep === 3 && mobileDesignPanelOpen ? "mobile-tools-open" : ""}`}>
+      <div
+        className={`config-wizard-body step-${currentStep} ${currentStep === 1 ? "catalog-mode" : ""} ${currentStep === 5 ? "checkout-mode" : ""} ${currentStep === 3 && mobileDesignPanelOpen ? "mobile-tools-open" : ""}`}
+        style={currentStep === 5 ? { gridTemplateColumns: "minmax(0, 780px)", justifyContent: "center" } : undefined}
+      >
         {/* Left Column: Authentic Spreadshirt Visual Canvas */}
-        {currentStep >= 2 && (
+        {currentStep >= 2 && currentStep < 5 && (
         <div className="config-preview-panel">
           <div className="stage-card">
             <div className="stage-header">
@@ -822,12 +1232,12 @@ export default function Configurator() {
                   style={currentStep === 3 && currentPrintZone ? getWorkspaceCanvasStyle(currentPrintZone, workspaceZoomed && hasArtwork) : undefined}
                 >
                 {/* Authentic Spreadshirt High-Res Render Image */}
-                <img src={currentMockupImage} alt={selectedItem.label} className="garment-base-img authentic" />
+                <NextImage src={currentMockupImage} alt={selectedItem.label} className="garment-base-img authentic" fill sizes="(max-width: 760px) calc(100vw - 32px), 600px" />
 
                 {/* The zone and product share one square coordinate system at every viewport size. */}
-                {(hasArtwork || currentStep >= 3) && currentPrintZone && (
+                {(hasArtwork || currentStep === 3) && currentPrintZone && (
                   <div
-                    className={`canvas-print-zone ${hasArtwork ? "has-image" : ""} ${currentStep === 3 ? "is-editable" : ""}`}
+                    className={`canvas-print-zone ${hasArtwork ? "has-image" : ""} ${currentStep === 3 ? "is-editable" : "is-preview"}`}
                     style={getPrintZoneStyle(currentPrintZone)}
                     aria-label={`Допустимая область печати: ${selectedItem.label}, ${viewAngle}`}
                     onPointerDown={(event) => {
@@ -863,25 +1273,61 @@ export default function Configurator() {
                     {currentElements.map((element) => (
                       <button
                         key={element.id}
-                        className={`canvas-design-element design-element-${element.type} ${selectedElementId === element.id ? "selected" : ""}`}
+                        className={`canvas-design-element design-element-${element.type} ${currentStep === 3 && selectedElementId === element.id ? "selected" : ""}`}
                         style={{
                           left: `${element.x}%`,
                           top: `${element.y}%`,
-                          width: element.type === "image" ? `${element.width}%` : undefined,
+                          aspectRatio: element.type === "shape" ? "1" : undefined,
+                          width: element.type !== "text" || (element.curve ?? 0) !== 0
+                            ? `${element.width}%`
+                            : undefined,
                           color: element.color,
                           fontFamily: element.fontFamily,
                           fontWeight: element.fontWeight,
+                          fontStyle: element.fontStyle,
+                          letterSpacing: element.type === "text" ? `${element.letterSpacing ?? 0}px` : undefined,
+                          textAlign: element.textAlign,
+                          WebkitTextStroke: element.type === "text" && element.outlined
+                            ? `0.8px ${getContrastingOutlineColor(element.color)}`
+                            : undefined,
                           transform: `translate(-50%, -50%) rotate(${element.rotation}deg) scale(${element.scale})`,
                         }}
                         type="button"
-                        aria-label={`${element.type === "image" ? "Изображение" : "Текст"}: ${element.name}`}
+                        aria-label={`${element.type === "image" ? "Изображение" : element.type === "shape" ? "Графика" : "Текст"}: ${element.name}`}
                         onPointerDown={(event) => startMoveGesture(event, element)}
                         onPointerMove={handleTransformMove}
                         onPointerUp={finishTransformGesture}
                         onPointerCancel={finishTransformGesture}
                       >
                         {element.type === "image" ? (
-                          <img src={element.content} alt="" draggable={false} />
+                          <>
+                            {/* Uploaded data URLs are already client-side data and cannot benefit from Next image optimization. */}
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={element.content} alt="" draggable={false} />
+                          </>
+                        ) : element.type === "shape" ? (
+                          <GraphicShape id={element.content as GraphicShapeId} className="canvas-shape-svg" />
+                        ) : (element.curve ?? 0) !== 0 ? (
+                          <svg className="curved-text-svg" viewBox="0 0 300 160" aria-hidden="true">
+                            <defs>
+                              <path id={`text-curve-${element.id}`} d={`M 16 100 Q 150 ${100 - (element.curve ?? 0) * 0.65} 284 100`} />
+                            </defs>
+                            <text
+                              fill={element.color}
+                              stroke={element.outlined ? getContrastingOutlineColor(element.color) : "none"}
+                              strokeWidth={element.outlined ? 2 : 0}
+                              paintOrder="stroke"
+                              fontFamily={element.fontFamily}
+                              fontWeight={element.fontWeight}
+                              fontStyle={element.fontStyle}
+                              fontSize={element.content.length > 17 ? 21 : element.content.length > 11 ? 26 : 32}
+                              letterSpacing={element.letterSpacing ?? 0}
+                            >
+                              <textPath href={`#text-curve-${element.id}`} startOffset="50%" textAnchor="middle">
+                                {element.content.replace(/\s+/g, " ")}
+                              </textPath>
+                            </text>
+                          </svg>
                         ) : (
                           <span>{element.content}</span>
                         )}
@@ -889,7 +1335,7 @@ export default function Configurator() {
                           <>
                             <span
                               className="design-resize-handle"
-                              style={{ transform: `scale(${1 / element.scale})` }}
+                              style={getResizeHandleStyle(currentPrintZone, element, workspaceZoomed)}
                               aria-hidden="true"
                               onPointerDown={(event) => startResizeGesture(event, element)}
                               onPointerMove={(event) => { event.stopPropagation(); handleTransformMove(event); }}
@@ -898,7 +1344,7 @@ export default function Configurator() {
                             />
                             <span
                               className="design-rotate-handle"
-                              style={{ transform: `translateX(-50%) scale(${1 / element.scale})` }}
+                              style={getRotateHandleStyle(currentPrintZone, element, workspaceZoomed)}
                               aria-hidden="true"
                               onPointerDown={(event) => startRotateGesture(event, element)}
                               onPointerMove={(event) => { event.stopPropagation(); handleTransformMove(event); }}
@@ -913,26 +1359,274 @@ export default function Configurator() {
                     ))}
                   </div>
                 )}
-                {(hasArtwork || currentStep >= 3) && !currentPrintZone && (
+                {currentStep === 3 && !currentPrintZone && (
                   <div className="print-zone-unavailable">На этом ракурсе нанесение недоступно</div>
                 )}
                 </div>
                 {currentStep === 3 && currentPrintZone && selectedElement && (
                   <div
-                    className="canvas-element-toolbar"
-                    style={getElementToolbarStyle(currentPrintZone, selectedElement, workspaceZoomed)}
+                    className={`canvas-element-toolbar ${selectedElement.type === "text" ? "text-quick-toolbar" : selectedElement.type === "shape" ? "shape-quick-toolbar" : ""}`}
+                    style={{
+                      ...getElementToolbarStyle(currentPrintZone, selectedElement, workspaceZoomed),
+                      ...(selectedElement.type === "shape" && quickTextPanel === "color" ? {
+                        top: "12px",
+                        left: "50%",
+                        width: "min(300px, calc(100vw - 20px))",
+                        transform: "translateX(-50%)",
+                        transformOrigin: "center top",
+                      } : {}),
+                    }}
                     role="toolbar"
                     aria-label="Управление выбранным элементом"
                   >
-                    <button type="button" onClick={() => updateSelectedElement({ scale: +clamp(selectedElement.scale - 0.1, 0.35, 2.2).toFixed(2) })} title="Уменьшить" aria-label="Уменьшить">
-                      <ConfigIcon name="minus" size={18}/>
-                    </button>
-                    <button type="button" onClick={() => updateSelectedElement({ scale: +clamp(selectedElement.scale + 0.1, 0.35, 2.2).toFixed(2) })} title="Увеличить" aria-label="Увеличить">
-                      <ConfigIcon name="plus" size={18}/>
-                    </button>
-                    <button type="button" onClick={deleteSelectedElement} className="danger" title="Удалить" aria-label="Удалить">
-                      <ConfigIcon name="trash" size={18}/>
-                    </button>
+                    {selectedElement.type === "text" ? (
+                      <>
+                        <div className="text-quick-editor-row">
+                          <input
+                            type="text"
+                            value={selectedElement.content}
+                            maxLength={60}
+                            onFocus={beginQuickTextEdit}
+                            onChange={(event) => updateQuickTextContent(event.target.value)}
+                            onBlur={finishQuickTextEdit}
+                            aria-label="Текст надписи"
+                          />
+                          <button type="button" onClick={duplicateSelectedElement} title="Дублировать" aria-label="Дублировать текст">
+                            <ConfigIcon name="copy" size={18}/>
+                          </button>
+                          <button type="button" onClick={deleteSelectedElement} className="danger" title="Удалить" aria-label="Удалить">
+                            <ConfigIcon name="trash" size={18}/>
+                          </button>
+                        </div>
+
+                        <div className="text-quick-controls-row">
+                          <button
+                            type="button"
+                            className="text-quick-font-trigger"
+                            style={{
+                              display: "inline-flex",
+                              justifyContent: "center",
+                              fontFamily: selectedElement.fontFamily ?? textFont,
+                            }}
+                            onClick={() => setQuickTextPanel("font")}
+                            aria-expanded={quickTextPanel === "font"}
+                            aria-label="Выбрать шрифт текста"
+                            title="Шрифт"
+                          >
+                            <span>{textFontOptions.find((font) => font.value === (selectedElement.fontFamily ?? textFont))?.label ?? "Шрифт"}</span>
+                            <ConfigIcon name="chevronDown" size={14}/>
+                          </button>
+                          <div className="text-quick-size" aria-label="Размер текста">
+                            <button type="button" onClick={() => updateSelectedTextQuick({ scale: +clamp(selectedElement.scale - 0.1, 0.35, 2.2).toFixed(2) })} title="Уменьшить" aria-label="Уменьшить текст">
+                              <ConfigIcon name="minus" size={17}/>
+                            </button>
+                            <output>{Math.round(selectedElement.scale * 100)}%</output>
+                            <button type="button" onClick={() => updateSelectedTextQuick({ scale: +clamp(selectedElement.scale + 0.1, 0.35, 2.2).toFixed(2) })} title="Увеличить" aria-label="Увеличить текст">
+                              <ConfigIcon name="plus" size={17}/>
+                            </button>
+                          </div>
+                          <button type="button" className={selectedElement.fontWeight === 800 ? "active" : ""} onClick={() => updateSelectedTextQuick({ fontWeight: selectedElement.fontWeight === 800 ? 500 : 800 })} aria-pressed={selectedElement.fontWeight === 800} title="Жирный" aria-label="Жирный текст">
+                            <ConfigIcon name="bold" size={18}/>
+                          </button>
+                          <button type="button" className={selectedElement.fontStyle === "italic" ? "active" : ""} onClick={() => updateSelectedTextQuick({ fontStyle: selectedElement.fontStyle === "italic" ? "normal" : "italic" })} aria-pressed={selectedElement.fontStyle === "italic"} title="Курсив" aria-label="Курсив">
+                            <ConfigIcon name="italic" size={18}/>
+                          </button>
+                          <button type="button" onClick={cycleSelectedTextAlignment} title="Выравнивание" aria-label={`Выравнивание: ${selectedElement.textAlign ?? "center"}`}>
+                            <ConfigIcon name={selectedElement.textAlign === "left" ? "alignLeft" : selectedElement.textAlign === "right" ? "alignRight" : "alignCenter"} size={18}/>
+                          </button>
+                        <button type="button" className={quickTextPanel === "curve" ? "active" : ""} onClick={() => setQuickTextPanel((panel) => panel === "curve" ? null : "curve")} aria-expanded={quickTextPanel === "curve"} title="Изгиб" aria-label="Настроить изгиб текста">
+                          <ConfigIcon name="curve" size={18}/>
+                        </button>
+                        <button
+                          type="button"
+                          className={`text-quick-color ${quickTextPanel === "color" ? "active" : ""}`}
+                          onClick={() => setQuickTextPanel((panel) => panel === "color" ? null : "color")}
+                          aria-expanded={quickTextPanel === "color"}
+                          aria-label="Изменить цвет текста"
+                          title="Цвет текста"
+                        >
+                          <span style={{ backgroundColor: selectedElement.color ?? "#111111" }} />
+                        </button>
+                        <button type="button" className={quickTextPanel === "more" ? "active" : ""} onClick={() => setQuickTextPanel((panel) => panel === "more" ? null : "more")} aria-expanded={quickTextPanel === "more"} title="Дополнительно" aria-label="Дополнительные настройки текста">
+                          <ConfigIcon name="more" size={18}/>
+                        </button>
+                        </div>
+
+                        {quickTextPanel === "font" && (
+                          <div className="text-quick-subpanel text-font-controls">
+                            <div className="text-quick-subpanel-head simple">
+                              <button type="button" onClick={() => setQuickTextPanel(null)} aria-label="Вернуться к настройкам текста" title="Назад">
+                                <ConfigIcon name="arrowLeft" size={17}/>
+                              </button>
+                              <b>Шрифт</b>
+                            </div>
+                            <div className="text-quick-font-list" role="radiogroup" aria-label="Выбор шрифта текста">
+                              {textFontOptions.map((font) => (
+                                <button
+                                  key={font.value}
+                                  type="button"
+                                  role="radio"
+                                  aria-checked={(selectedElement.fontFamily ?? textFont) === font.value}
+                                  className={(selectedElement.fontFamily ?? textFont) === font.value ? "active" : ""}
+                                  style={{ fontFamily: font.value }}
+                                  onClick={() => updateSelectedTextQuick({ fontFamily: font.value })}
+                                >
+                                  <span>Принт</span>
+                                  <small>{font.label}</small>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {quickTextPanel === "color" && (
+                          <div className="text-quick-subpanel text-color-controls">
+                            <div className="text-quick-subpanel-head simple">
+                              <button type="button" onClick={() => setQuickTextPanel(null)} aria-label="Вернуться к настройкам текста" title="Назад">
+                                <ConfigIcon name="arrowLeft" size={17}/>
+                              </button>
+                              <b>Цвет текста</b>
+                            </div>
+                            <div className="text-color-swatches" role="radiogroup" aria-label="Выбор цвета текста">
+                              {textColorOptions.map((textColor) => (
+                                <button
+                                  key={textColor.value}
+                                  type="button"
+                                  role="radio"
+                                  aria-checked={(selectedElement.color ?? "#111111") === textColor.value}
+                                  className={(selectedElement.color ?? "#111111") === textColor.value ? "active" : ""}
+                                  onClick={() => {
+                                    updateSelectedTextQuick({ color: textColor.value });
+                                    setQuickTextPanel(null);
+                                  }}
+                                  aria-label={textColor.label}
+                                  title={textColor.label}
+                                >
+                                  <span style={{ backgroundColor: textColor.value }} />
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {quickTextPanel === "curve" && (
+                          <div className="text-quick-subpanel text-curve-controls">
+                            <div className="text-quick-subpanel-head">
+                              <button type="button" onClick={() => setQuickTextPanel(null)} aria-label="Вернуться к настройкам текста" title="Назад">
+                                <ConfigIcon name="arrowLeft" size={17}/>
+                              </button>
+                              <b>Изгиб</b>
+                              <input type="range" min="-100" max="100" step="5" value={selectedElement.curve ?? 0} onChange={(event) => updateSelectedTextQuick({ curve: Number(event.target.value) })} aria-label="Сила изгиба" />
+                              <output>{selectedElement.curve ?? 0}%</output>
+                            </div>
+                            <div className="text-curve-presets" role="group" aria-label="Форма текста">
+                              <button type="button" className={(selectedElement.curve ?? 0) === 0 ? "active" : ""} onClick={() => updateSelectedTextQuick({ curve: 0 })}>Прямо</button>
+                              <button type="button" className={(selectedElement.curve ?? 0) > 0 ? "active" : ""} onClick={() => updateSelectedTextQuick({ curve: 55 })}>Дуга вверх</button>
+                              <button type="button" className={(selectedElement.curve ?? 0) < 0 ? "active" : ""} onClick={() => updateSelectedTextQuick({ curve: -55 })}>Дуга вниз</button>
+                            </div>
+                          </div>
+                        )}
+
+                        {quickTextPanel === "more" && (
+                          <div className="text-quick-subpanel text-more-controls">
+                            <div className="text-quick-subpanel-head simple">
+                              <button type="button" onClick={() => setQuickTextPanel(null)} aria-label="Вернуться к настройкам текста" title="Назад">
+                                <ConfigIcon name="arrowLeft" size={17}/>
+                              </button>
+                              <b>Дополнительно</b>
+                            </div>
+                            <div className="text-more-controls-row">
+                              <button type="button" className={selectedElement.outlined ? "active" : ""} onClick={() => updateSelectedTextQuick({ outlined: !selectedElement.outlined })} aria-pressed={selectedElement.outlined}>
+                                <ConfigIcon name="type" size={17}/> Контур
+                              </button>
+                              <label>
+                                <span>Интервал</span>
+                                <input type="range" min="0" max="6" step="0.5" value={Math.max(0, selectedElement.letterSpacing ?? 0)} onChange={(event) => updateSelectedTextQuick({ letterSpacing: Number(event.target.value) })} />
+                                <output>{selectedElement.letterSpacing ?? 0}px</output>
+                              </label>
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    ) : selectedElement.type === "shape" ? (
+                      <>
+                        {quickTextPanel === "color" ? (
+                          <div className="text-quick-subpanel shape-color-controls">
+                            <div className="text-quick-subpanel-head simple">
+                              <button type="button" onClick={() => setQuickTextPanel(null)} aria-label="Вернуться к настройкам графики" title="Назад">
+                                <ConfigIcon name="arrowLeft" size={17}/>
+                              </button>
+                              <b>Цвет графики</b>
+                            </div>
+                            <div className="text-color-swatches" role="radiogroup" aria-label="Выбор цвета графики">
+                              {textColorOptions.map((graphicColor) => (
+                                <button
+                                  key={graphicColor.value}
+                                  type="button"
+                                  role="radio"
+                                  aria-checked={(selectedElement.color ?? "#111111") === graphicColor.value}
+                                  className={(selectedElement.color ?? "#111111") === graphicColor.value ? "active" : ""}
+                                  onClick={() => {
+                                    updateSelectedElement({ color: graphicColor.value });
+                                    setQuickTextPanel(null);
+                                  }}
+                                  aria-label={graphicColor.label}
+                                  title={graphicColor.label}
+                                >
+                                  <span style={{ backgroundColor: graphicColor.value }} />
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <button type="button" onClick={() => updateSelectedElement({ scale: +clamp(selectedElement.scale - 0.1, 0.3, 2.4).toFixed(2) })} title="Уменьшить" aria-label="Уменьшить графику">
+                              <ConfigIcon name="minus" size={18}/>
+                            </button>
+                            <button type="button" onClick={() => updateSelectedElement({ scale: +clamp(selectedElement.scale + 0.1, 0.3, 2.4).toFixed(2) })} title="Увеличить" aria-label="Увеличить графику">
+                              <ConfigIcon name="plus" size={18}/>
+                            </button>
+                            <button type="button" onClick={() => updateSelectedElement({ rotation: selectedElement.rotation - 15 })} title="Повернуть влево" aria-label="Повернуть графику влево">
+                              <ConfigIcon name="rotate" size={18}/>
+                            </button>
+                            <button type="button" onClick={() => updateSelectedElement({ rotation: selectedElement.rotation + 15 })} title="Повернуть вправо" aria-label="Повернуть графику вправо">
+                              <span className="mirrored-icon"><ConfigIcon name="rotate" size={18}/></span>
+                            </button>
+                            <button
+                              type="button"
+                              className="text-quick-color"
+                              onClick={() => setQuickTextPanel("color")}
+                              aria-expanded={false}
+                              aria-label="Изменить цвет графики"
+                              title="Цвет графики"
+                            >
+                              <span style={{ backgroundColor: selectedElement.color ?? "#111111" }} />
+                            </button>
+                            <button type="button" onClick={duplicateSelectedElement} title="Дублировать" aria-label="Дублировать графику">
+                              <ConfigIcon name="copy" size={18}/>
+                            </button>
+                            <button type="button" onClick={deleteSelectedElement} className="danger" title="Удалить" aria-label="Удалить графику">
+                              <ConfigIcon name="trash" size={18}/>
+                            </button>
+                          </>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <button type="button" onClick={() => updateSelectedElement({ scale: +clamp(selectedElement.scale - 0.1, 0.35, 2.2).toFixed(2) })} title="Уменьшить" aria-label="Уменьшить">
+                          <ConfigIcon name="minus" size={18}/>
+                        </button>
+                        <button type="button" onClick={() => updateSelectedElement({ scale: +clamp(selectedElement.scale + 0.1, 0.35, 2.2).toFixed(2) })} title="Увеличить" aria-label="Увеличить">
+                          <ConfigIcon name="plus" size={18}/>
+                        </button>
+                        <button type="button" onClick={duplicateSelectedElement} title="Дублировать" aria-label="Дублировать изображение">
+                          <ConfigIcon name="copy" size={18}/>
+                        </button>
+                        <button type="button" onClick={deleteSelectedElement} className="danger" title="Удалить" aria-label="Удалить">
+                          <ConfigIcon name="trash" size={18}/>
+                        </button>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
@@ -1110,7 +1804,7 @@ export default function Configurator() {
             <div className="step-pane designer-pane animate-fade">
               <div className="step-pane-header">
                 <h2>Создайте макет</h2>
-                <p>Добавьте изображение или текст. Перемещайте выбранный элемент прямо на товаре.</p>
+                <p>Добавьте изображение, текст или графику. Перемещайте выбранный элемент прямо на товаре.</p>
               </div>
 
               <input
@@ -1124,10 +1818,11 @@ export default function Configurator() {
                 }}
               />
 
-              <div className="designer-tool-tabs" role="tablist" aria-label="Инструменты конструктора">
+              <div className="designer-tool-tabs" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }} role="tablist" aria-label="Инструменты конструктора">
                 {[
                   { id: "image", label: "Изображение", icon: "image" },
                   { id: "text", label: "Текст", icon: "type" },
+                  { id: "graphics", label: "Графика", icon: "shapes" },
                 ].map((tool) => (
                   <button
                     key={tool.id}
@@ -1176,35 +1871,127 @@ export default function Configurator() {
                 )}
 
                 {activeDesignerTool === "text" && (
-                  <div className="designer-text-panel">
-                    <label className="designer-field designer-text-field">
-                      <span>Надпись</span>
-                      <input value={textValue} maxLength={60} onChange={(event) => setTextValue(event.target.value)} placeholder="Введите текст" />
-                    </label>
-                    <label className="designer-field">
-                      <span>Шрифт</span>
-                      <select value={textFont} onChange={(event) => setTextFont(event.target.value)}>
-                        <option value="Arial, sans-serif">Arial</option>
-                        <option value="Verdana, sans-serif">Verdana</option>
-                        <option value="Georgia, serif">Georgia</option>
-                        <option value="Trebuchet MS, sans-serif">Trebuchet</option>
-                        <option value="Courier New, monospace">Courier</option>
-                      </select>
-                    </label>
-                    <div className="designer-text-options">
-                      <label className="designer-color-control" title="Цвет текста">
-                        <span style={{ backgroundColor: textColor }} />
-                        <input type="color" value={textColor} onChange={(event) => setTextColor(event.target.value)} aria-label="Цвет текста" />
-                        Цвет
-                      </label>
-                      <button type="button" className={`designer-format-button ${textBold ? "active" : ""}`} onClick={() => setTextBold((value) => !value)} aria-pressed={textBold}>
-                        <ConfigIcon name="bold" size={18}/> Жирный
-                      </button>
-                      <button type="button" className="button button-primary" onClick={addOrUpdateText} disabled={!textValue.trim()}>
-                        <ConfigIcon name="plus" size={17}/>
-                        {selectedElement?.type === "text" ? "Сохранить" : "Добавить"}
+                  <div className="designer-text-store">
+                    <div className="designer-add-text">
+                      <div>
+                        <b>Свой текст</b>
+                        <span>Добавьте надпись и отредактируйте её прямо на изделии</span>
+                      </div>
+                      <button type="button" className="button button-primary" onClick={addPlainText}>
+                        <ConfigIcon name="plus" size={18}/>
+                        Добавить текст
                       </button>
                     </div>
+                    <div className="designer-font-picker">
+                      <span className="designer-control-label">Шрифт</span>
+                      <div className="designer-font-list" role="radiogroup" aria-label="Шрифт текста">
+                        {textFontOptions.map((font) => (
+                          <button
+                            key={font.value}
+                            type="button"
+                            role="radio"
+                            aria-checked={textFont === font.value}
+                            className={textFont === font.value ? "active" : ""}
+                            style={{ fontFamily: font.value }}
+                            onClick={() => setTextFont(font.value)}
+                          >
+                            <span>Принт</span>
+                            <small>{font.label}</small>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="designer-text-presets">
+                      <div className="designer-store-heading">
+                        <span className="designer-control-label">Магазин надписей</span>
+                        <small>Готовые стили</small>
+                      </div>
+                      <div className="text-preset-grid">
+                        {textPresets.map((preset) => (
+                          <button
+                            key={preset.id}
+                            type="button"
+                            className={`text-preset-card preset-${preset.id}`}
+                            onClick={() => addTextPreset(preset)}
+                            aria-label={`Добавить шаблон: ${preset.label}`}
+                          >
+                            <span
+                              className={preset.curve !== 0 ? "preset-curved" : ""}
+                              style={{
+                                color: preset.color,
+                                fontFamily: preset.fontFamily,
+                                fontWeight: preset.fontWeight,
+                                fontStyle: preset.fontStyle,
+                                letterSpacing: `${preset.letterSpacing}px`,
+                                WebkitTextStroke: preset.outlined ? "0.7px #111827" : undefined,
+                              }}
+                            >
+                              {preset.content}
+                            </span>
+                            <small>{preset.label}</small>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {activeDesignerTool === "graphics" && (
+                  <div className="designer-graphics-store" style={{ minWidth: 0, display: "grid", gap: 10 }}>
+                    <div className="designer-store-heading">
+                      <span className="designer-control-label">Магазин графики</span>
+                      <small>{graphicShapes.length + graphicClipart.length} элементов</small>
+                    </div>
+                    {graphicCollections.map((collection, collectionIndex) => (
+                      <section
+                        key={collection.id}
+                        className="graphic-collection"
+                        style={{
+                          minWidth: 0,
+                          display: "grid",
+                          gap: 7,
+                          marginTop: collectionIndex ? 8 : 0,
+                          paddingTop: collectionIndex ? 16 : 0,
+                          borderTop: collectionIndex ? "1px solid #e5e7eb" : 0,
+                        }}
+                      >
+                        <div className="graphic-collection-heading" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                          <b style={{ color: "#111827", fontSize: 12 }}>{collection.label}</b>
+                          <span style={{ minWidth: 22, padding: "2px 6px", borderRadius: 4, background: "#eef0f3", color: "#6b7280", fontSize: 9, fontWeight: 800, textAlign: "center" }}>{collection.items.length}</span>
+                        </div>
+                        <div className="graphic-shape-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
+                          {collection.items.map((graphic) => (
+                            <button
+                              key={graphic.id}
+                              type="button"
+                              className="graphic-shape-card"
+                              style={{
+                                minWidth: 0,
+                                aspectRatio: "1",
+                                padding: "12px 9px 7px",
+                                display: "grid",
+                                gridTemplateRows: "minmax(0, 1fr) auto",
+                                placeItems: "center",
+                                gap: 7,
+                                overflow: "hidden",
+                                border: "1px solid #d1d5db",
+                                borderRadius: 8,
+                                backgroundColor: "#ffffff",
+                                color: graphic.color,
+                                cursor: "pointer",
+                              }}
+                              onClick={() => addGraphic(graphic)}
+                              aria-label={`Добавить графику: ${graphic.label}`}
+                            >
+                              <span style={{ width: "min(82%, 104px)", height: "min(82%, 104px)" }}>
+                                <GraphicShape id={graphic.id} className="graphic-shape-preview" />
+                              </span>
+                              <small style={{ width: "calc(100% + 18px)", margin: "0 -9px -7px", padding: "6px 7px", borderTop: "1px solid #e5e7eb", color: "#6b7280", fontSize: 9, fontWeight: 800, textAlign: "left" }}>{graphic.label}</small>
+                            </button>
+                          ))}
+                        </div>
+                      </section>
+                    ))}
                   </div>
                 )}
 
@@ -1221,8 +2008,8 @@ export default function Configurator() {
                         className={selectedElementId === element.id ? "active" : ""}
                         onClick={() => selectDesignElement(element)}
                       >
-                        <ConfigIcon name={element.type === "image" ? "image" : "type"} size={15}/>
-                        <span>{element.type === "image" ? element.name : element.content || `Текст ${index + 1}`}</span>
+                        <ConfigIcon name={element.type === "image" ? "image" : element.type === "shape" ? "shapes" : "type"} size={15}/>
+                        <span>{element.type === "image" || element.type === "shape" ? element.name : element.content || `Текст ${index + 1}`}</span>
                       </button>
                     ))}
                   </div>
@@ -1240,72 +2027,126 @@ export default function Configurator() {
             </div>
           )}
 
-          {/* STEP 4: METHOD, SIZE & QUANTITY */}
+          {/* STEP 4: METHOD, AUTOMATIC FORMAT & QUANTITY */}
           {currentStep === 4 && (
             <div className="step-pane animate-fade">
               <div className="step-pane-header">
-                <h2>Тираж и параметры печати</h2>
-                <p>Чем больше тираж — тем меньше цена за единицу изделия!</p>
+                <h2>Печать и тираж</h2>
+                <p>Выберите способ нанесения и укажите количество изделий.</p>
               </div>
 
               <div className="section-block">
-                <h3>Технология печати</h3>
+                <div className="section-heading-row">
+                  <h3>Технология нанесения</h3>
+                  <span>Цена указана за одно изделие</span>
+                </div>
                 <div className="methods-stack">
                   {Object.entries(methods).map(([key, m]) => (
                     <button
                       key={key}
+                      type="button"
                       className={`method-select-card ${method === key ? "selected" : ""}`}
                       onClick={() => setMethod(key as keyof typeof methods)}
+                      aria-pressed={method === key}
                     >
-                      <div>
-                        <b>{m.label}</b>
+                      <span className="method-icon"><ConfigIcon name={m.icon} size={22}/></span>
+                      <div className="method-copy">
+                        <span className="method-title-row">
+                          <b>{m.label}</b>
+                          {recommendedMethod === key && <em>Рекомендуем</em>}
+                        </span>
                         <small>{m.desc}</small>
+                        <span className="method-tags">
+                          {m.tags.map((tag) => <span key={tag}>{tag}</span>)}
+                        </span>
                       </div>
-                      <span className="method-add-badge">+{m.add} BYN</span>
+                      <div className="method-choice">
+                        <span className="method-add-badge">+{m.add} BYN</span>
+                        <span className="method-radio" aria-hidden="true">
+                          {method === key && <ConfigIcon name="check" size={14}/>}
+                        </span>
+                      </div>
                     </button>
                   ))}
                 </div>
               </div>
 
               <div className="section-block">
-                <h3>Размер принта</h3>
-                <div className="sizes-chips-row">
-                  {printSizes.map((s) => (
-                    <button
-                      key={s.id}
-                      className={`size-chip ${sizeFormat === s.id ? "selected" : ""}`}
-                      onClick={() => setSizeFormat(s.id)}
-                    >
-                      <b>{s.id}</b>
-                      <small>{s.note}</small>
-                    </button>
-                  ))}
+                <h3>Размер нанесения</h3>
+                <div className="automatic-format-card">
+                  <span className="automatic-format-icon"><ConfigIcon name="target" size={24}/></span>
+                  <div className="automatic-format-copy">
+                    <small>{printEstimate.isFallback ? "Предварительный формат" : "Рассчитано по вашему макету"}</small>
+                    <strong>{selectedSize.label} <span>{selectedSize.dimensions}</span></strong>
+                    <p>
+                      {printEstimate.isFallback
+                        ? "Добавьте макет, и формат пересчитается автоматически."
+                        : `Фактический габарит около ${printEstimate.width.toString().replace(".", ",")} × ${printEstimate.height.toString().replace(".", ",")} см.`}
+                    </p>
+                  </div>
+                  <span className="automatic-format-note">Уточним перед печатью</span>
                 </div>
               </div>
 
               <div className="section-block qty-calculator-block">
-                <h3>Количество изделий (Тираж)</h3>
-                <div className="qty-control-row">
-                  <button onClick={() => setQty((q) => Math.max(1, q - 10))}>−10</button>
-                  <button onClick={() => setQty((q) => Math.max(1, q - 1))}>−</button>
-                  <input
-                    type="number"
-                    value={qty}
-                    min="1"
-                    max="1000"
-                    onChange={(e) => setQty(Math.max(1, Number(e.target.value)))}
-                  />
-                  <button onClick={() => setQty((q) => Math.min(1000, q + 1))}>+</button>
-                  <button onClick={() => setQty((q) => Math.min(1000, q + 10))}>+10</button>
+                <div className="section-heading-row">
+                  <h3>Количество изделий</h3>
+                  <span>От 1 до 1000 шт.</span>
+                </div>
+                <div className="quantity-composer">
+                  <div className="qty-stepper" aria-label="Количество изделий">
+                    <button type="button" onClick={() => setQty((q) => Math.max(1, q - 1))} aria-label="Уменьшить количество">
+                      <ConfigIcon name="minus" size={20}/>
+                    </button>
+                    <label>
+                      <input
+                        type="number"
+                        inputMode="numeric"
+                        value={qty}
+                        min="1"
+                        max="1000"
+                        aria-label="Количество изделий"
+                        onChange={(e) => setQty(clamp(Number(e.target.value) || 1, 1, 1000))}
+                      />
+                      <span>шт.</span>
+                    </label>
+                    <button type="button" onClick={() => setQty((q) => Math.min(1000, q + 1))} aria-label="Увеличить количество">
+                      <ConfigIcon name="plus" size={20}/>
+                    </button>
+                  </div>
+                  <div className="quantity-presets" aria-label="Быстрый выбор количества">
+                    {quantityPresets.map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        className={qty === preset ? "active" : ""}
+                        onClick={() => setQty(preset)}
+                      >
+                        {preset}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
                 <div className="volume-discount-bar">
-                  <div className="discount-pill">
-                    {qty >= 200 ? "🔥 Максимальная скидка 24%" : qty >= 100 ? "⚡ Скидка 18%" : qty >= 50 ? "👍 Скидка 11%" : qty >= 20 ? "💡 Скидка 5%" : "Добавьте от 20 шт. для скидки"}
+                  <div className="discount-summary">
+                    <div>
+                      <small>Скидка за тираж</small>
+                      <b>{discount.percent ? `${discount.percent}%` : "Пока без скидки"}</b>
+                    </div>
+                    {discount.nextAt && <span>Ещё {discount.nextAt - qty} шт. до следующей скидки</span>}
+                  </div>
+                  <div className="quantity-discount-scale" aria-label="Пороговые значения скидки">
+                    {[1, 20, 50, 100, 200].map((milestone) => (
+                      <span key={milestone} className={qty >= milestone ? "active" : ""}>
+                        <i />
+                        <small>{milestone}{milestone === 200 ? "+" : ""}</small>
+                      </span>
+                    ))}
                   </div>
                   <div className="unit-sum-display">
-                    <span>Цена за 1 шт: <b>{unitPrice} BYN</b></span>
-                    <span>Итого тираж: <strong>{totalPrice} BYN</strong></span>
+                    <span>За одно изделие <b>{unitPrice} BYN</b></span>
+                    <span>Итого <strong>{totalPrice} BYN</strong></span>
                   </div>
                 </div>
               </div>
@@ -1327,75 +2168,160 @@ export default function Configurator() {
               {!submitted ? (
                 <>
                   <div className="step-pane-header">
-                    <h2>Проверьте заказ и оставьте контакты</h2>
-                    <p>Проверьте детали и укажите номер телефона для подтверждения расчёта.</p>
+                    <h2>Оформление заказа</h2>
+                    <p>Оставьте контакты — менеджер проверит макет и подтвердит итоговую стоимость.</p>
                   </div>
 
-                  <div className="order-summary-card">
-                    <h3>Детали вашего заказа</h3>
-                    <div className="summary-list">
-                      <div className="summary-row"><span>Изделие:</span><b>{selectedItem.label} · {selectedColor.label} · {selectedGarmentSize.label}</b></div>
-                      <div className="summary-row"><span>Печать:</span><b>{methods[method].label} ({selectedSize.label})</b></div>
-                      <div className="summary-row"><span>Расположение:</span><b>{selectedPlacementCopy.label}</b></div>
-                      <div className="summary-row"><span>Макет:</span><b>{designElementsCount ? `${designElementsCount} элем.` : "Не добавлен"}</b></div>
-                      <div className="summary-row"><span>Количество:</span><b>{qty} шт.</b></div>
-                      <hr className="my-2"/>
-                      <div className="summary-row total"><span>Итоговая сумма:</span><strong>{totalPrice} BYN</strong></div>
+                  <div className="checkout-summary">
+                    <div className="checkout-summary-heading">
+                      <div>
+                        <small>Ваш расчёт</small>
+                        <h3>{selectedItem.label}, {qty} шт.</h3>
+                      </div>
+                      <span>{discount.percent ? `Скидка ${discount.percent}%` : "Базовая цена"}</span>
+                    </div>
+                    <div className="checkout-summary-list">
+                      <div className="checkout-summary-item">
+                        <span className="checkout-summary-icon"><ConfigIcon name="shirt" size={19}/></span>
+                        <div><small>Изделие</small><b>{selectedColor.label} · {selectedGarmentSize.label}</b></div>
+                        <button type="button" onClick={() => setCurrentStep(2)} aria-label="Изменить изделие" title="Изменить изделие"><ConfigIcon name="edit" size={16}/></button>
+                      </div>
+                      <div className="checkout-summary-item">
+                        <span className="checkout-summary-icon"><ConfigIcon name="upload" size={19}/></span>
+                        <div><small>Макет</small><b>{designElementsCount ? `${designElementsCount} элем. · ${selectedPlacementCopy.label}` : "Макет не добавлен"}</b></div>
+                        <button type="button" onClick={() => setCurrentStep(3)} aria-label="Изменить макет" title="Изменить макет"><ConfigIcon name="edit" size={16}/></button>
+                      </div>
+                      <div className="checkout-summary-item">
+                        <span className="checkout-summary-icon"><ConfigIcon name="layers" size={19}/></span>
+                        <div><small>Печать и тираж</small><b>{methods[method].label} · {selectedSize.label} · {qty} шт.</b></div>
+                        <button type="button" onClick={() => setCurrentStep(4)} aria-label="Изменить печать и тираж" title="Изменить печать и тираж"><ConfigIcon name="edit" size={16}/></button>
+                      </div>
+                    </div>
+                    <div className="checkout-total-row">
+                      <span><small>{qty} шт. × {unitPrice} BYN</small><b>Предварительная стоимость</b></span>
+                      <strong>{totalPrice} BYN</strong>
                     </div>
                   </div>
 
-                  <form className="contact-form-block" onSubmit={handleSubmitOrder}>
-                    <div className="form-group">
-                      <label>Ваше имя</label>
-                      <input
-                        type="text"
-                        placeholder="Например, Александр"
-                        value={customerName}
-                        onChange={(e) => setCustomerName(e.target.value)}
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label>Номер телефона <span className="req">*</span></label>
-                      <input
-                        type="tel"
-                        required
-                        placeholder="+375 (29) 000-00-00"
-                        value={customerPhone}
-                        onChange={(e) => setCustomerPhone(e.target.value)}
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label>Комментарий или пожелания</label>
-                      <textarea
-                        rows={2}
-                        placeholder="Укажите нужные размеры (S, M, L, XL) или адрес доставки..."
-                        value={customerComment}
-                        onChange={(e) => setCustomerComment(e.target.value)}
-                      />
-                    </div>
+                  <form id="order-checkout-form" className="checkout-form" onSubmit={handleSubmitOrder}>
+                    <section className="checkout-section">
+                      <div className="checkout-section-heading">
+                        <span>1</span>
+                        <div><h3>Контактные данные</h3><p>Кому отправить подтверждение расчёта</p></div>
+                      </div>
+                      <div className="checkout-form-grid">
+                        <div className="form-group">
+                          <label htmlFor="customer-name">Ваше имя <span className="req">*</span></label>
+                          <input
+                            id="customer-name"
+                            type="text"
+                            required
+                            autoComplete="name"
+                            placeholder="Александр"
+                            value={customerName}
+                            onChange={(e) => setCustomerName(e.target.value)}
+                          />
+                        </div>
+                        <div className="form-group">
+                          <label htmlFor="customer-phone">Номер телефона <span className="req">*</span></label>
+                          <input
+                            id="customer-phone"
+                            type="tel"
+                            required
+                            autoComplete="tel"
+                            inputMode="tel"
+                            placeholder="+375 (29) 000-00-00"
+                            value={customerPhone}
+                            aria-invalid={Boolean(phoneError)}
+                            aria-describedby={phoneError ? "customer-phone-error" : undefined}
+                            onChange={(e) => {
+                              setCustomerPhone(e.target.value);
+                              if (phoneError) setPhoneError("");
+                            }}
+                          />
+                          {phoneError && <small id="customer-phone-error" className="form-field-error" role="alert">{phoneError}</small>}
+                        </div>
+                      </div>
+                      <div className="checkout-choice-label">Как удобнее связаться</div>
+                      <div className="checkout-segmented" role="group" aria-label="Предпочтительный способ связи">
+                        <button type="button" className={contactMethod === "phone" ? "selected" : ""} onClick={() => setContactMethod("phone")} aria-pressed={contactMethod === "phone"}>
+                          <ConfigIcon name="phone" size={17}/> Позвонить
+                        </button>
+                        <button type="button" className={contactMethod === "telegram" ? "selected" : ""} onClick={() => setContactMethod("telegram")} aria-pressed={contactMethod === "telegram"}>
+                          <ConfigIcon name="message" size={17}/> Написать в Telegram
+                        </button>
+                      </div>
+                    </section>
 
-                    <div className="step-actions-row desktop-only mt-4">
+                    <section className="checkout-section">
+                      <div className="checkout-section-heading">
+                        <span>2</span>
+                        <div><h3>Получение заказа</h3><p>Способ и стоимость доставки подтвердит менеджер</p></div>
+                      </div>
+                      <div className="fulfillment-options">
+                        <button type="button" className={fulfillmentMethod === "pickup" ? "selected" : ""} onClick={() => setFulfillmentMethod("pickup")} aria-pressed={fulfillmentMethod === "pickup"}>
+                          <ConfigIcon name="pin" size={21}/>
+                          <span><b>Самовывоз</b><small>Минск, ул. Октябрьская, 16</small></span>
+                          <i>{fulfillmentMethod === "pickup" && <ConfigIcon name="check" size={13}/>}</i>
+                        </button>
+                        <button type="button" className={fulfillmentMethod === "delivery" ? "selected" : ""} onClick={() => setFulfillmentMethod("delivery")} aria-pressed={fulfillmentMethod === "delivery"}>
+                          <ConfigIcon name="truck" size={21}/>
+                          <span><b>Доставка</b><small>По Минску и Беларуси</small></span>
+                          <i>{fulfillmentMethod === "delivery" && <ConfigIcon name="check" size={13}/>}</i>
+                        </button>
+                      </div>
+                      {fulfillmentMethod === "delivery" && (
+                        <div className="form-group checkout-address-field">
+                          <label htmlFor="delivery-address">Город и адрес доставки <span className="req">*</span></label>
+                          <input
+                            id="delivery-address"
+                            type="text"
+                            required
+                            autoComplete="street-address"
+                            placeholder="Минск, ул. ..."
+                            value={deliveryAddress}
+                            onChange={(e) => setDeliveryAddress(e.target.value)}
+                          />
+                        </div>
+                      )}
+                    </section>
+
+                    <section className="checkout-section checkout-comment-section">
+                      <div className="form-group">
+                        <label htmlFor="customer-comment">Комментарий <span>необязательно</span></label>
+                        <textarea
+                          id="customer-comment"
+                          rows={3}
+                          placeholder="Распределение размеров по тиражу, срок или другие пожелания"
+                          value={customerComment}
+                          onChange={(e) => setCustomerComment(e.target.value)}
+                        />
+                      </div>
+                    </section>
+
+                    <div className="checkout-submit-row desktop-only">
                       <button type="button" className="button outline" onClick={() => setCurrentStep(4)}>
                         <ConfigIcon name="arrowLeft" size={18}/> Назад
                       </button>
                       <button type="submit" className="button button-primary wide">
-                        Отправить расчёт печатнику <ConfigIcon name="arrowRight" size={18}/>
+                        Отправить заявку · {totalPrice} BYN <ConfigIcon name="arrowRight" size={18}/>
                       </button>
                     </div>
+                    <p className="checkout-confirmation-note">Точная стоимость фиксируется после проверки макета менеджером.</p>
                   </form>
                 </>
               ) : (
                 <div className="success-order-box animate-fade">
                   <div className="success-icon"><ConfigIcon name="check" size={48}/></div>
                   <h2>Заказ №{orderId} принят!</h2>
-                  <p>Спасибо! Мы сохранили расчёт для <b>{customerName || "клиента"}</b> ({customerPhone}).</p>
-                  <p className="subtext">Наш печатник забронировал ткани и свяжется с вами в течение 10-15 минут для согласования цветов и формата!</p>
+                  <p>Спасибо, <b>{customerName}</b>. Подтверждение отправим на номер {customerPhone}.</p>
+                  <p className="subtext">Менеджер проверит макет, рассчитает получение заказа и свяжется с вами {contactMethod === "telegram" ? "в Telegram" : "по телефону"}.</p>
 
                   <div className="success-actions">
                     <a className="button button-primary" href="https://t.me/printservice_by" target="_blank" rel="noopener noreferrer">
                       Написать менеджеру в Telegram
                     </a>
-                    <button className="button outline" onClick={() => { setSubmitted(false); setCurrentStep(1); }}>
+                    <button className="button outline" onClick={startNewOrder}>
                       Создать новый заказ
                     </button>
                   </div>
@@ -1416,7 +2342,7 @@ export default function Configurator() {
       )}
 
       {/* Sticky Mobile Action Footer */}
-      {!submitted && (
+      {!submitted && currentStep !== 1 && (
         <div className={`mobile-config-sticky-footer ${currentStep === 3 ? "designer-mobile-footer" : ""}`}>
           {currentStep === 3 ? (
             <>
@@ -1431,11 +2357,11 @@ export default function Configurator() {
                 <button
                   type="button"
                   className={mobileDesignPanelOpen ? "active" : ""}
-                  onClick={() => setMobileDesignPanelOpen((open) => !open)}
+                  onClick={toggleMobileDesignPanel}
                   aria-expanded={mobileDesignPanelOpen}
                 >
-                  <ConfigIcon name="layers" size={22}/>
-                  <span>Дизайн</span>
+                  <ConfigIcon name={mobileDesignPanelOpen ? "check" : "layers"} size={22}/>
+                  <span>{mobileDesignPanelOpen ? "Готово" : "Дизайн"}</span>
                 </button>
                 <button type="button" className="designer-mobile-next" onClick={() => { setMobileDesignPanelOpen(false); setCurrentStep(4); }} aria-label="Перейти к тиражу">
                   <ConfigIcon name="arrowRight" size={24}/>
@@ -1460,7 +2386,7 @@ export default function Configurator() {
 
               <div className="sticky-buttons-group">
                 {currentStep > 1 && (
-                  <button className="button outline button-small" onClick={() => setCurrentStep((s) => s - 1)}>
+                  <button className="button outline button-small" onClick={() => setCurrentStep((s) => s - 1)} aria-label="Вернуться на предыдущий шаг">
                     <ConfigIcon name="arrowLeft" size={16}/>
                   </button>
                 )}
@@ -1469,8 +2395,8 @@ export default function Configurator() {
                     Далее <ConfigIcon name="arrowRight" size={16}/>
                   </button>
                 ) : (
-                  <button className="button button-primary button-small" onClick={(e) => handleSubmitOrder(e)}>
-                    Отправить <ConfigIcon name="arrowRight" size={16}/>
+                  <button type="submit" form="order-checkout-form" className="button button-primary button-small">
+                    Оформить <ConfigIcon name="arrowRight" size={16}/>
                   </button>
                 )}
               </div>

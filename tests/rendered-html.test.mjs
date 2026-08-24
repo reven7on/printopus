@@ -58,9 +58,42 @@ test("renders the Printopus pages with the production Next.js server", { timeout
       assert.equal(response.status, 200, `${route} should return 200`);
       assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
       const html = await response.text();
+      const visibleText = html.replace(/<[^>]*>/g, "");
       assert.match(html, expectedText);
       assert.doesNotMatch(html, /codex-preview/i);
+      assert.match(html, /rel="canonical"/i);
+      assert.match(html, /property="og:image"/i);
+      assert.match(html, /name="twitter:card" content="summary_large_image"/i);
+
+      if (route === "/") {
+        assert.match(html, /href="https:\/\/printservice\.by\/?"/i);
+        assert.match(visibleText, /от 20 штук/i);
+        assert.match(visibleText, /до -24%/i);
+        assert.match(visibleText, /Instagram \(@printservice_by\)/i);
+        assert.doesNotMatch(visibleText, /Instagram \(@printservice\.by\)/i);
+      } else {
+        assert.match(html, /href="https:\/\/printservice\.by\/configurator"/i);
+        assert.match(visibleText, /Далее: Выбор цвета/i);
+        assert.match(visibleText, /от 15 BYN/i);
+      }
     }
+
+    const robotsResponse = await fetch(`${baseUrl}/robots.txt`);
+    assert.equal(robotsResponse.status, 200);
+    const robots = await robotsResponse.text();
+    assert.match(robots, /Allow: \//);
+    assert.match(robots, /Sitemap: https:\/\/printservice\.by\/sitemap\.xml/);
+
+    const sitemapResponse = await fetch(`${baseUrl}/sitemap.xml`);
+    assert.equal(sitemapResponse.status, 200);
+    const sitemap = await sitemapResponse.text();
+    assert.match(sitemap, /https:\/\/printservice\.by<\/loc>/);
+    assert.match(sitemap, /https:\/\/printservice\.by\/configurator<\/loc>/);
+
+    const socialImageResponse = await fetch(`${baseUrl}/og.png`);
+    assert.equal(socialImageResponse.status, 200);
+    assert.match(socialImageResponse.headers.get("content-type") ?? "", /^image\/png\b/i);
+    assert(Number(socialImageResponse.headers.get("content-length")) > 100_000);
   } catch (error) {
     error.message += `\nNext.js output:\n${output}`;
     throw error;

@@ -7,14 +7,14 @@
   },
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "next build --webpack",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test": "npm run build && node --test tests/rendered-html.test.mjs",
+    "test": "npm run build && node --test tests/*.test.mjs",
     "lint": "eslint ."
   },
   "dependencies": {
-    "next": "16.2.6",
+    "next": "^16.3.2",
     "react": "19.2.6",
     "react-dom": "19.2.6"
   },
@@ -24,10 +24,10 @@
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
     "eslint": "9.39.4",
-    "eslint-config-next": "16.2.6",
+    "eslint-config-next": "^16.3.2",
     "tailwindcss": "4.2.1",
     "typescript": "5.9.3"
   },
   "type": "module",
-  "displayName": "\u041f\u0440\u0438\u043d\u0442 \u0426\u0435\u043d\u0442\u0440 \u2014 \u043f\u0435\u0447\u0430\u0442\u044c \u043d\u0430 \u043e\u0434\u0435\u0436\u0434\u0435"
+  "displayName": "Принт Центр — печать на одежде"
 }
