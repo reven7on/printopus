@@ -27,8 +27,12 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files (keep the documented template)
 .env*
+!.env.example
+
+# generated database client
+/app/generated/prisma/
 
 # vercel
 .vercel
