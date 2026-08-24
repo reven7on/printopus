@@ -2684,6 +2684,7 @@ footer{background:#141517;color:#fff;padding:55px 6vw;display:grid;grid-template
 .checkout-comment-section textarea { min-height: 78px; resize: vertical; }
 .checkout-submit-row { display: flex; gap: 10px; margin-top: 20px; }
 .checkout-submit-row .wide { flex: 1; }
+.checkout-submit-error { margin: 10px 0 0; color: #b91c1c; font-size: 11px; font-weight: 750; line-height: 1.4; text-align: center; }
 .checkout-confirmation-note { margin: 10px 0 0; color: #8b919b; font-size: 9.5px; line-height: 1.4; text-align: center; }
 
 .success-order-box {

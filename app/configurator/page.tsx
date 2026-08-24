@@ -6,6 +6,7 @@ import NextImage from "next/image";
 import Link from "next/link";
 import {
   DEFAULT_PRINT_METHOD_PRICE,
+  GARMENT_COLOR_PRICES,
   getQuantityDiscount,
   PRINT_FORMATS,
   PRODUCT_BASE_PRICES,
@@ -191,18 +192,18 @@ const textPresets: TextPreset[] = [
 ];
 
 const garmentColors = [
-  { id: "white", label: "Белый", hex: "#ffffff", border: "#e5e7eb", add: 0 },
-  { id: "natural", label: "Натуральный", hex: "#f7ebcd", border: "#e5e7eb", add: 0 },
-  { id: "black", label: "Чёрный", hex: "#1a1a1a", border: "#1a1a1a", add: 2 },
-  { id: "khaki", label: "Хаки / Олива", hex: "#786c62", border: "#786c62", add: 2 },
-  { id: "grey", label: "Меланж", hex: "#5b5d61", border: "#5b5d61", add: 2 },
-  { id: "darkgrey", label: "Тёмно-серый", hex: "#4a4b4d", border: "#4a4b4d", add: 2 },
-  { id: "navy", label: "Тёмно-синий", hex: "#1a2437", border: "#1a2437", add: 2 },
-  { id: "blue", label: "Синий", hex: "#2b49b3", border: "#2b49b3", add: 2 },
-  { id: "red", label: "Красный", hex: "#d71920", border: "#d71920", add: 2 },
-  { id: "burgundy", label: "Бордовый", hex: "#750033", border: "#750033", add: 2 },
-  { id: "green", label: "Зелёный", hex: "#07462c", border: "#07462c", add: 2 },
-  { id: "sand", label: "Песочный", hex: "#ebe4dc", border: "#ebe4dc", add: 2 },
+  { id: "white", label: "Белый", hex: "#ffffff", border: "#e5e7eb", add: GARMENT_COLOR_PRICES.white },
+  { id: "natural", label: "Натуральный", hex: "#f7ebcd", border: "#e5e7eb", add: GARMENT_COLOR_PRICES.natural },
+  { id: "black", label: "Чёрный", hex: "#1a1a1a", border: "#1a1a1a", add: GARMENT_COLOR_PRICES.black },
+  { id: "khaki", label: "Хаки / Олива", hex: "#786c62", border: "#786c62", add: GARMENT_COLOR_PRICES.khaki },
+  { id: "grey", label: "Меланж", hex: "#5b5d61", border: "#5b5d61", add: GARMENT_COLOR_PRICES.grey },
+  { id: "darkgrey", label: "Тёмно-серый", hex: "#4a4b4d", border: "#4a4b4d", add: GARMENT_COLOR_PRICES.darkgrey },
+  { id: "navy", label: "Тёмно-синий", hex: "#1a2437", border: "#1a2437", add: GARMENT_COLOR_PRICES.navy },
+  { id: "blue", label: "Синий", hex: "#2b49b3", border: "#2b49b3", add: GARMENT_COLOR_PRICES.blue },
+  { id: "red", label: "Красный", hex: "#d71920", border: "#d71920", add: GARMENT_COLOR_PRICES.red },
+  { id: "burgundy", label: "Бордовый", hex: "#750033", border: "#750033", add: GARMENT_COLOR_PRICES.burgundy },
+  { id: "green", label: "Зелёный", hex: "#07462c", border: "#07462c", add: GARMENT_COLOR_PRICES.green },
+  { id: "sand", label: "Песочный", hex: "#ebe4dc", border: "#ebe4dc", add: GARMENT_COLOR_PRICES.sand },
 ];
 
 const garmentSizesByItem: Record<ItemId, readonly { id: string; label: string }[]> = {
@@ -338,6 +339,29 @@ function createEmptyDesigns(): DesignsByView {
     sleeve_left: [],
     sleeve_right: [],
   };
+}
+
+function getOrderDesignSnapshot(designs: DesignsByView) {
+  return Object.fromEntries(
+    Object.entries(designs).map(([view, elements]) => [
+      view,
+      elements.map((element) => {
+        if (element.type !== "image") return element;
+        return {
+          id: element.id,
+          type: element.type,
+          name: element.name,
+          x: element.x,
+          y: element.y,
+          scale: element.scale,
+          rotation: element.rotation,
+          width: element.width,
+          aspectRatio: element.aspectRatio,
+          quality: element.quality,
+        };
+      }),
+    ]),
+  );
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -635,6 +659,8 @@ export default function Configurator() {
   const [deliveryAddress, setDeliveryAddress] = useState("");
   const [submitted, setSubmitted] = useState(false);
   const [orderId, setOrderId] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [submissionError, setSubmissionError] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const historyRef = useRef<DesignsByView[]>([]);
   const redoRef = useRef<DesignsByView[]>([]);
@@ -1075,7 +1101,7 @@ export default function Configurator() {
     setSnapGuides({ vertical: false, horizontal: false });
   }
 
-  function handleSubmitOrder(e?: React.SyntheticEvent) {
+  async function handleSubmitOrder(e?: React.SyntheticEvent) {
     if (e) e.preventDefault();
     if (!customerName.trim()) return;
     if (!isValidBelarusianPhone(customerPhone)) {
@@ -1084,9 +1110,49 @@ export default function Configurator() {
     }
     if (fulfillmentMethod === "delivery" && !deliveryAddress.trim()) return;
     setPhoneError("");
-    const randomId = "BY-" + Math.floor(100000 + Math.random() * 900000);
-    setOrderId(randomId);
-    setSubmitted(true);
+    setSubmissionError("");
+    setSubmitting(true);
+
+    try {
+      const response = await fetch("/api/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          customerName,
+          customerPhone,
+          contactMethod,
+          fulfillmentMethod,
+          deliveryAddress: fulfillmentMethod === "delivery" ? deliveryAddress : null,
+          comment: customerComment,
+          productSlug: item,
+          color,
+          size: selectedGarmentSize.id,
+          printMethodSlug: method,
+          printFormatCode: selectedSize.id,
+          placement,
+          quantity: qty,
+          design: getOrderDesignSnapshot(designs),
+        }),
+      });
+      const result = await response.json() as {
+        order?: { orderNumber?: string };
+        error?: { message?: string; field?: string };
+      };
+
+      if (!response.ok || !result.order?.orderNumber) {
+        const message = result.error?.message ?? "Не удалось отправить заявку. Попробуйте ещё раз.";
+        if (result.error?.field === "customerPhone") setPhoneError(message);
+        else setSubmissionError(message);
+        return;
+      }
+
+      setOrderId(result.order.orderNumber);
+      setSubmitted(true);
+    } catch (error) {
+      setSubmissionError(error instanceof Error ? error.message : "Не удалось отправить заявку. Попробуйте ещё раз.");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   function startNewOrder() {
@@ -1110,6 +1176,8 @@ export default function Configurator() {
     setFulfillmentMethod("pickup");
     setDeliveryAddress("");
     setOrderId("");
+    setSubmitting(false);
+    setSubmissionError("");
     historyRef.current = [];
     redoRef.current = [];
     setHistoryAvailability({ undo: 0, redo: 0 });
@@ -2303,10 +2371,11 @@ export default function Configurator() {
                       <button type="button" className="button outline" onClick={() => setCurrentStep(4)}>
                         <ConfigIcon name="arrowLeft" size={18}/> Назад
                       </button>
-                      <button type="submit" className="button button-primary wide">
-                        Отправить заявку · {totalPrice} BYN <ConfigIcon name="arrowRight" size={18}/>
+                      <button type="submit" className="button button-primary wide" disabled={submitting}>
+                        {submitting ? "Отправляем…" : `Отправить заявку · ${totalPrice} BYN`} {!submitting && <ConfigIcon name="arrowRight" size={18}/>}
                       </button>
                     </div>
+                    {submissionError && <p className="checkout-submit-error" role="alert">{submissionError}</p>}
                     <p className="checkout-confirmation-note">Точная стоимость фиксируется после проверки макета менеджером.</p>
                   </form>
                 </>
@@ -2395,8 +2464,8 @@ export default function Configurator() {
                     Далее <ConfigIcon name="arrowRight" size={16}/>
                   </button>
                 ) : (
-                  <button type="submit" form="order-checkout-form" className="button button-primary button-small">
-                    Оформить <ConfigIcon name="arrowRight" size={16}/>
+                  <button type="submit" form="order-checkout-form" className="button button-primary button-small" disabled={submitting}>
+                    {submitting ? "Отправляем…" : "Оформить"} {!submitting && <ConfigIcon name="arrowRight" size={16}/>}
                   </button>
                 )}
               </div>

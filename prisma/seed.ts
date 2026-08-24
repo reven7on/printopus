@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient, ProductKind, ProductOptionType } from "../app/generated/prisma/client";
-import { PRINT_FORMATS, PRODUCT_BASE_PRICES } from "../app/pricing";
+import { GARMENT_COLOR_PRICES, PRINT_FORMATS, PRODUCT_BASE_PRICES } from "../app/pricing";
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) throw new Error("DATABASE_URL is required for seeding.");
@@ -19,18 +19,18 @@ const products = [
 ] as const;
 
 const colorDetails: Record<string, { label: string; colorHex: string; priceDelta: number }> = {
-  white: { label: "Белый", colorHex: "#ffffff", priceDelta: 0 },
-  natural: { label: "Натуральный", colorHex: "#e8dcc7", priceDelta: 0 },
-  black: { label: "Чёрный", colorHex: "#111111", priceDelta: 2 },
-  khaki: { label: "Хаки / Олива", colorHex: "#77735b", priceDelta: 2 },
-  grey: { label: "Меланж", colorHex: "#b6b6b6", priceDelta: 1 },
-  darkgrey: { label: "Тёмно-серый", colorHex: "#55585d", priceDelta: 1 },
-  navy: { label: "Тёмно-синий", colorHex: "#1f2a44", priceDelta: 2 },
-  blue: { label: "Синий", colorHex: "#2b49b3", priceDelta: 2 },
-  red: { label: "Красный", colorHex: "#d71920", priceDelta: 2 },
-  burgundy: { label: "Бордовый", colorHex: "#750033", priceDelta: 2 },
-  green: { label: "Зелёный", colorHex: "#07462c", priceDelta: 2 },
-  sand: { label: "Песочный", colorHex: "#ebe4dc", priceDelta: 2 },
+  white: { label: "Белый", colorHex: "#ffffff", priceDelta: GARMENT_COLOR_PRICES.white },
+  natural: { label: "Натуральный", colorHex: "#e8dcc7", priceDelta: GARMENT_COLOR_PRICES.natural },
+  black: { label: "Чёрный", colorHex: "#111111", priceDelta: GARMENT_COLOR_PRICES.black },
+  khaki: { label: "Хаки / Олива", colorHex: "#77735b", priceDelta: GARMENT_COLOR_PRICES.khaki },
+  grey: { label: "Меланж", colorHex: "#b6b6b6", priceDelta: GARMENT_COLOR_PRICES.grey },
+  darkgrey: { label: "Тёмно-серый", colorHex: "#55585d", priceDelta: GARMENT_COLOR_PRICES.darkgrey },
+  navy: { label: "Тёмно-синий", colorHex: "#1f2a44", priceDelta: GARMENT_COLOR_PRICES.navy },
+  blue: { label: "Синий", colorHex: "#2b49b3", priceDelta: GARMENT_COLOR_PRICES.blue },
+  red: { label: "Красный", colorHex: "#d71920", priceDelta: GARMENT_COLOR_PRICES.red },
+  burgundy: { label: "Бордовый", colorHex: "#750033", priceDelta: GARMENT_COLOR_PRICES.burgundy },
+  green: { label: "Зелёный", colorHex: "#07462c", priceDelta: GARMENT_COLOR_PRICES.green },
+  sand: { label: "Песочный", colorHex: "#ebe4dc", priceDelta: GARMENT_COLOR_PRICES.sand },
 };
 
 async function seed() {

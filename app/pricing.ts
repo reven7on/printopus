@@ -8,6 +8,21 @@ export const PRODUCT_BASE_PRICES = {
 
 export const DEFAULT_PRINT_METHOD_PRICE = 4;
 
+export const GARMENT_COLOR_PRICES = {
+  white: 0,
+  natural: 0,
+  black: 2,
+  khaki: 2,
+  grey: 2,
+  darkgrey: 2,
+  navy: 2,
+  blue: 2,
+  red: 2,
+  burgundy: 2,
+  green: 2,
+  sand: 2,
+} as const;
+
 export const PRINT_FORMATS = [
   { id: "A7", label: "A7", dimensions: "7,4 × 10,5 см", landingLabel: "маленький логотип", scale: "xs", width: 7.4, height: 10.5, add: 0 },
   { id: "A6", label: "A6", dimensions: "10,5 × 14,8 см", landingLabel: "небольшой принт", scale: "sm", width: 10.5, height: 14.8, add: 2 },

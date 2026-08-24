@@ -3,6 +3,11 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { getAutomaticPrintEstimate } from "../app/configurator/editor-math.ts";
 import { isValidBelarusianPhone, normalizePhone } from "../app/order-validation.ts";
+import {
+  calculateOrderQuote,
+  OrderInputError,
+  parseCreateOrderInput,
+} from "../lib/order-domain.ts";
 import { getQuantityDiscount, PRINT_FORMATS, PRODUCT_BASE_PRICES } from "../app/pricing.ts";
 
 test("volume discount boundaries match the public offer", () => {
@@ -66,4 +71,48 @@ test("responsive contracts cover landing navigation and configurator controls", 
   assert.match(css, /\.designer-mobile-navigation/);
   assert.match(configurator, /aria-label="Вернуться на предыдущий шаг"/);
   assert.match(configurator, /inputMode="tel"/);
+});
+
+test("order input is normalized and rejects incomplete delivery data", () => {
+  const input = parseCreateOrderInput({
+    customerName: "  Анна  ",
+    customerPhone: "8 (029) 555-20-30",
+    contactMethod: "telegram",
+    fulfillmentMethod: "pickup",
+    productSlug: "shirt",
+    color: "white",
+    size: "M",
+    printMethodSlug: "dtf",
+    printFormatCode: "a4",
+    placement: "center",
+    quantity: 20,
+    design: { front: [] },
+  });
+
+  assert.equal(input.customerName, "Анна");
+  assert.equal(input.customerPhone, "375295552030");
+  assert.equal(input.size, "m");
+  assert.equal(input.printFormatCode, "A4");
+
+  assert.throws(
+    () => parseCreateOrderInput({ ...input, fulfillmentMethod: "delivery", deliveryAddress: "" }),
+    (error) => error instanceof OrderInputError && error.field === "deliveryAddress",
+  );
+});
+
+test("server quote calculation uses authoritative prices and quantity discount", () => {
+  assert.deepEqual(calculateOrderQuote({
+    productPrice: 15,
+    colorPrice: 0,
+    printMethodPrice: 4,
+    printFormatPrice: 7,
+    quantity: 20,
+    discountPercent: 5,
+  }), {
+    baseUnitPrice: 26,
+    unitPrice: 24.7,
+    subtotal: 520,
+    discountPercent: 5,
+    total: 494,
+  });
 });

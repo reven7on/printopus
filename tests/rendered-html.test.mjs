@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import "dotenv/config";
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import pg from "pg";
 import test from "node:test";
 
 const projectRoot = fileURLToPath(new URL("..", import.meta.url));
@@ -45,6 +47,7 @@ test("renders the Printopus pages with the production Next.js server", { timeout
   server.stdout.on("data", (chunk) => { output += chunk; });
   server.stderr.on("data", (chunk) => { output += chunk; });
   const processExited = new Promise((resolve) => server.once("exit", () => resolve("exited")));
+  let createdOrderId = null;
 
   try {
     const baseUrl = `http://127.0.0.1:${port}`;
@@ -94,10 +97,75 @@ test("renders the Printopus pages with the production Next.js server", { timeout
     assert.equal(socialImageResponse.status, 200);
     assert.match(socialImageResponse.headers.get("content-type") ?? "", /^image\/png\b/i);
     assert(Number(socialImageResponse.headers.get("content-length")) > 100_000);
+
+    const catalogResponse = await fetch(`${baseUrl}/api/catalog`);
+    assert.equal(catalogResponse.status, 200);
+    const catalog = await catalogResponse.json();
+    assert.equal(catalog.currency, "BYN");
+    assert.equal(catalog.products.find((product) => product.slug === "shirt")?.basePrice, 15);
+    assert.deepEqual(catalog.volumeDiscounts.map((discount) => discount.minQuantity), [20, 50, 100, 200]);
+
+    const invalidOrderResponse = await fetch(`${baseUrl}/api/orders`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ customerName: "А", customerPhone: "123" }),
+    });
+    assert.equal(invalidOrderResponse.status, 400);
+
+    const orderResponse = await fetch(`${baseUrl}/api/orders`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        customerName: "Проверка API",
+        customerPhone: "+375 (29) 555-20-30",
+        contactMethod: "phone",
+        fulfillmentMethod: "pickup",
+        comment: "Автоматический тест",
+        productSlug: "shirt",
+        color: "white",
+        size: "M",
+        printMethodSlug: "dtf",
+        printFormatCode: "A4",
+        placement: "center",
+        quantity: 20,
+        design: { front: [] },
+        total: 1,
+      }),
+    });
+    assert.equal(orderResponse.status, 201);
+    const createdOrder = await orderResponse.json();
+    createdOrderId = createdOrder.order.id;
+    assert.match(createdOrder.order.orderNumber, /^BY-\d{8}-[A-F0-9]{6}$/);
+    assert.equal(createdOrder.order.discountPercent, 5);
+    assert.equal(createdOrder.order.total, 494);
+
+    const database = new pg.Client({ connectionString: process.env.DATABASE_URL });
+    await database.connect();
+    try {
+      const persisted = await database.query(
+        'SELECT o.total, i.quantity, i."unitPrice" FROM orders o JOIN order_items i ON i."orderId" = o.id WHERE o.id = $1',
+        [createdOrderId],
+      );
+      assert.equal(persisted.rowCount, 1);
+      assert.equal(Number(persisted.rows[0].total), 494);
+      assert.equal(persisted.rows[0].quantity, 20);
+      assert.equal(Number(persisted.rows[0].unitPrice), 24.7);
+    } finally {
+      await database.end();
+    }
   } catch (error) {
     error.message += `\nNext.js output:\n${output}`;
     throw error;
   } finally {
+    if (createdOrderId && process.env.DATABASE_URL) {
+      const database = new pg.Client({ connectionString: process.env.DATABASE_URL });
+      await database.connect();
+      try {
+        await database.query("DELETE FROM orders WHERE id = $1", [createdOrderId]);
+      } finally {
+        await database.end();
+      }
+    }
     if (server.exitCode === null) {
       server.kill("SIGTERM");
       await processExited;
