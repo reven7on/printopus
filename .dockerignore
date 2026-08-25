@@ -1,0 +1,13 @@
+.git
+.next
+.data
+node_modules
+npm-debug.log*
+.env
+.env.*
+!.env.example
+!.env.production.example
+backups
+coverage
+docs
+print_site_ui_mockup_*.jpg

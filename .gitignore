@@ -30,12 +30,13 @@ yarn-error.log*
 # env files (keep the documented template)
 .env*
 !.env.example
+!.env.production.example
 
 # generated database client
 /app/generated/prisma/
 
-# vercel
-.vercel
+# private customer uploads
+/.data/
 
 # typescript
 next-env.d.ts

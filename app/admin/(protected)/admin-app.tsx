@@ -40,7 +40,7 @@ type OrderDetails = OrderSummary & {
     design: unknown;
     printMethod: { name: string } | null;
     printFormat: { code: string; widthCm: string; heightCm: string } | null;
-    assets: Array<{ id: string; originalName: string; mimeType: string; sizeBytes: number }>;
+    assets: Array<{ id: string; originalName: string; mimeType: string; sizeBytes: number; width: number | null; height: number | null }>;
   }>;
   statusHistory: Array<{
     id: string;
@@ -89,6 +89,12 @@ function money(value: number) {
 
 function dateTime(value: string) {
   return new Intl.DateTimeFormat("ru-BY", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+}
+
+function fileSize(value: number) {
+  return value >= 1024 * 1024
+    ? `${(value / (1024 * 1024)).toFixed(1)} МБ`
+    : `${Math.max(1, Math.round(value / 1024))} КБ`;
 }
 
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
@@ -403,7 +409,7 @@ function OrderPanel({ order, saving, onClose, onSubmit }: { order: OrderDetails;
         <div className="admin-panel-scroll">
           <section className="admin-order-customer"><div><small>Клиент</small><strong>{order.customerName}</strong><a href={`tel:+${order.customerPhone}`}>+{order.customerPhone}</a></div><div><small>Получение</small><strong>{order.fulfillmentMethod === "DELIVERY" ? "Доставка" : "Самовывоз"}</strong><span>{order.deliveryAddress || "ул. Октябрьская, 16"}</span></div></section>
           {order.comment && <section className="admin-order-comment"><small>Комментарий клиента</small><p>{order.comment}</p></section>}
-          <section className="admin-order-items"><h3>Состав заказа</h3>{order.items.map((item) => <article key={item.id}><div><strong>{item.productName}</strong><span>{item.colorLabel} · {item.sizeLabel} · {item.placement}</span><small>{item.printMethod?.name} · {item.printFormat?.code} · {item.quantity} шт.</small></div><b>{money(item.total)}</b></article>)}</section>
+          <section className="admin-order-items"><h3>Состав заказа</h3>{order.items.map((item) => <article key={item.id}><div><strong>{item.productName}</strong><span>{item.colorLabel} · {item.sizeLabel} · {item.placement}</span><small>{item.printMethod?.name} · {item.printFormat?.code} · {item.quantity} шт.</small>{item.assets.length > 0 && <div className="admin-order-assets">{item.assets.map((asset) => <a key={asset.id} href={`/api/admin/assets/${asset.id}`} download><span>Скачать макет</span><b>{asset.originalName}</b><small>{fileSize(asset.sizeBytes)}{asset.width && asset.height ? ` · ${asset.width}×${asset.height} px` : ""}</small></a>)}</div>}</div><b>{money(item.total)}</b></article>)}</section>
           <section className="admin-order-totals"><div><span>До скидки</span><b>{money(order.subtotal)}</b></div><div><span>Скидка</span><b>{order.discountPercent}%</b></div><div><span>Итого</span><strong>{money(order.total)}</strong></div></section>
           <form className="admin-status-form" onSubmit={onSubmit}><h3>Изменить статус</h3><label><span>Новый статус</span><select name="status" defaultValue={order.status}>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label><span>Комментарий для истории</span><textarea name="note" rows={2} maxLength={500} placeholder="Например: согласован макет" /></label><button type="submit" disabled={saving}>{saving ? "Сохраняем…" : "Сохранить статус"}</button></form>
           <section className="admin-history"><h3>История статусов</h3>{order.statusHistory.length ? order.statusHistory.map((event) => <div key={event.id}><i data-status={event.toStatus} /><span><b>{statusLabels[event.toStatus]}</b><small>{event.note || `Изменил ${event.changedBy}`}</small></span><time>{dateTime(event.createdAt)}</time></div>) : <p className="admin-empty">Статус ещё не менялся.</p>}</section>

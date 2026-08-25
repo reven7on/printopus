@@ -44,7 +44,17 @@ export async function GET(request: Request, context: RouteContext) {
           include: {
             printMethod: { select: { name: true } },
             printFormat: { select: { code: true, widthCm: true, heightCm: true } },
-            assets: true,
+            assets: {
+              select: {
+                id: true,
+                originalName: true,
+                mimeType: true,
+                sizeBytes: true,
+                width: true,
+                height: true,
+                createdAt: true,
+              },
+            },
           },
         },
         statusHistory: { orderBy: { createdAt: "desc" } },

@@ -36,6 +36,7 @@ type GraphicItem = {
 
 type DesignElement = {
   id: string;
+  uploadId?: string;
   type: DesignElementType;
   content: string;
   name: string;
@@ -348,6 +349,7 @@ function getOrderDesignSnapshot(designs: DesignsByView) {
         if (element.type !== "image") return element;
         return {
           id: element.id,
+          uploadId: element.uploadId,
           type: element.type,
           name: element.name,
           x: element.x,
@@ -667,6 +669,7 @@ export default function Configurator() {
   const transformGestureRef = useRef<TransformGesture | null>(null);
   const quickTextEditBeforeRef = useRef<DesignsByView | null>(null);
   const nextElementIdRef = useRef(0);
+  const pendingUploadsRef = useRef(new Map<string, File>());
 
   function resolveColors(itemKey: ItemId) {
     const product = publicCatalog?.products.find((entry) => entry.slug === itemKey);
@@ -803,8 +806,10 @@ export default function Configurator() {
     const initial = getInitialElementPosition(placement);
     const zone = getPrintZone(item, viewAngle);
     nextElementIdRef.current += 1;
+    const uploadId = `image-${nextElementIdRef.current}`;
     const newElement: DesignElement = {
-      id: `image-${nextElementIdRef.current}`,
+      id: uploadId,
+      uploadId,
       type: "image",
       content: source,
       name: sourceFile.name,
@@ -816,6 +821,7 @@ export default function Configurator() {
       aspectRatio: naturalWidth > 0 && naturalHeight > 0 ? naturalWidth / naturalHeight : 1,
       quality,
     };
+    pendingUploadsRef.current.set(uploadId, sourceFile);
     commitDesigns({ ...designs, [viewAngle]: [...designs[viewAngle], newElement] });
     setSelectedElementId(newElement.id);
     setWorkspaceZoomed(true);
@@ -825,15 +831,30 @@ export default function Configurator() {
   function handleFile(file?: File) {
     if (!file) return;
     const extension = file.name.split(".").pop()?.toLowerCase();
-    const allowedExtensions = ["png", "jpg", "jpeg", "webp", "svg"];
+    const allowedExtensions = ["png", "jpg", "jpeg", "webp"];
     if (!extension || !allowedExtensions.includes(extension)) {
-      setFileError("Поддерживаются PNG, JPG, WebP и SVG.");
+      setFileError("Поддерживаются только PNG, JPG и WebP. SVG и видео запрещены.");
       setActiveDesignerTool("image");
       setMobileDesignPanelOpen(true);
       return;
     }
-    if (file.size > 20 * 1024 * 1024) {
-      setFileError("Файл больше 20 МБ. Уменьшите его и загрузите снова.");
+    if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
+      setFileError("Содержимое файла не похоже на поддерживаемое изображение.");
+      setActiveDesignerTool("image");
+      setMobileDesignPanelOpen(true);
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setFileError("Файл больше 10 МБ. Уменьшите его и загрузите снова.");
+      setActiveDesignerTool("image");
+      setMobileDesignPanelOpen(true);
+      return;
+    }
+    const activeUploadIds = new Set(
+      Object.values(designs).flat().flatMap((element) => element.type === "image" && element.uploadId ? [element.uploadId] : []),
+    );
+    if (activeUploadIds.size >= 5) {
+      setFileError("К одному заказу можно приложить не более 5 изображений.");
       setActiveDesignerTool("image");
       setMobileDesignPanelOpen(true);
       return;
@@ -850,13 +871,11 @@ export default function Configurator() {
       const image = new Image();
       image.onload = () => {
         const shortestSide = Math.min(image.naturalWidth, image.naturalHeight);
-        const quality: DesignElement["quality"] = extension === "svg"
-          ? "vector"
-          : shortestSide >= 1200
-            ? "good"
-            : shortestSide >= 700
-              ? "medium"
-              : "low";
+        const quality: DesignElement["quality"] = shortestSide >= 1200
+          ? "good"
+          : shortestSide >= 700
+            ? "medium"
+            : "low";
         addImageElement(source, file, quality, image.naturalWidth, image.naturalHeight);
       };
       image.onerror = () => {
@@ -1178,10 +1197,7 @@ export default function Configurator() {
     setSubmitting(true);
 
     try {
-      const response = await fetch("/api/orders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const orderPayload = {
           customerName,
           customerPhone,
           contactMethod,
@@ -1196,7 +1212,21 @@ export default function Configurator() {
           placement,
           quantity: qty,
           design: getOrderDesignSnapshot(designs),
-        }),
+      };
+      const activeUploadIds = Array.from(new Set(
+        Object.values(designs).flat().flatMap((element) => element.type === "image" && element.uploadId ? [element.uploadId] : []),
+      ));
+      const files = activeUploadIds.flatMap((uploadId) => {
+        const file = pendingUploadsRef.current.get(uploadId);
+        return file ? [file] : [];
+      });
+      const formData = new FormData();
+      formData.append("order", JSON.stringify(orderPayload));
+      files.forEach((file) => formData.append("files", file, file.name));
+
+      const response = await fetch("/api/orders", {
+        method: "POST",
+        body: formData,
       });
       const result = await response.json() as {
         order?: { orderNumber?: string };
@@ -1230,6 +1260,7 @@ export default function Configurator() {
     setPlacement("center");
     setQty(30);
     setDesigns(createEmptyDesigns());
+    pendingUploadsRef.current.clear();
     setSelectedElementId(null);
     setWorkspaceZoomed(false);
     setCustomerName("");
@@ -1942,7 +1973,7 @@ export default function Configurator() {
               <input
                 ref={inputRef}
                 type="file"
-                accept=".png,.jpg,.jpeg,.webp,.svg"
+                accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
                 hidden
                 onChange={(event) => {
                   handleFile(event.target.files?.[0]);
@@ -1981,7 +2012,7 @@ export default function Configurator() {
                       <span className="upload-icon-wrap"><ConfigIcon name="upload" size={24}/></span>
                       <div className="upload-prompt">
                         <p><b>Добавьте логотип или изображение</b></p>
-                        <small>PNG, JPG, WebP или SVG · до 20 МБ</small>
+                        <small>PNG, JPG или WebP · до 10 МБ · не более 5 файлов</small>
                       </div>
                       <button className="button button-primary button-small" type="button" onClick={() => inputRef.current?.click()}>
                         Выбрать файл

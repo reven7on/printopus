@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import "dotenv/config";
 import { spawn } from "node:child_process";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { createServer } from "node:net";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import pg from "pg";
@@ -37,11 +39,12 @@ async function waitForServer(url, processExited) {
 
 test("renders the Printopus pages with the production Next.js server", { timeout: 30_000 }, async () => {
   const port = await reservePort();
+  const uploadRoot = await mkdtemp(path.join(tmpdir(), "printopus-uploads-"));
   const nextBin = path.join(projectRoot, "node_modules/next/dist/bin/next");
   let output = "";
   const server = spawn(process.execPath, [nextBin, "start", "--hostname", "127.0.0.1", "--port", String(port)], {
     cwd: projectRoot,
-    env: { ...process.env, NODE_ENV: "production" },
+    env: { ...process.env, NODE_ENV: "production", UPLOAD_DIR: uploadRoot },
     stdio: ["ignore", "pipe", "pipe"],
   });
   server.stdout.on("data", (chunk) => { output += chunk; });
@@ -54,6 +57,10 @@ test("renders the Printopus pages with the production Next.js server", { timeout
   try {
     const baseUrl = `http://127.0.0.1:${port}`;
     await waitForServer(baseUrl, processExited);
+
+    const healthResponse = await fetch(`${baseUrl}/api/health`);
+    assert.equal(healthResponse.status, 200);
+    assert.deepEqual(await healthResponse.json(), { status: "ok" });
 
     for (const [route, expectedText] of [
       ["/", /Принтопус|ПРИНТОПУС/i],
@@ -129,10 +136,7 @@ test("renders the Printopus pages with the production Next.js server", { timeout
     });
     assert.equal(invalidOrderResponse.status, 400);
 
-    const orderResponse = await fetch(`${baseUrl}/api/orders`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
+    const validOrderPayload = {
         customerName: "Проверка API",
         customerPhone: "+375 (29) 555-20-30",
         contactMethod: "phone",
@@ -147,7 +151,28 @@ test("renders the Printopus pages with the production Next.js server", { timeout
         quantity: 20,
         design: { front: [] },
         total: 1,
-      }),
+    };
+
+    const disguisedVideo = new FormData();
+    disguisedVideo.append("order", JSON.stringify({ ...validOrderPayload, customerName: "Опасный файл" }));
+    disguisedVideo.append("files", new File([Buffer.from("000000186674797069736f6d00000200", "hex")], "logo.png", { type: "image/png" }));
+    const rejectedVideoResponse = await fetch(`${baseUrl}/api/orders`, { method: "POST", body: disguisedVideo });
+    assert.equal(rejectedVideoResponse.status, 415);
+    assert.match((await rejectedVideoResponse.json()).error.message, /PNG, JPEG и WebP|отклонены/i);
+
+    const svgUpload = new FormData();
+    svgUpload.append("order", JSON.stringify({ ...validOrderPayload, customerName: "SVG файл" }));
+    svgUpload.append("files", new File(["<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>"], "logo.svg", { type: "image/svg+xml" }));
+    const rejectedSvgResponse = await fetch(`${baseUrl}/api/orders`, { method: "POST", body: svgUpload });
+    assert.equal(rejectedSvgResponse.status, 415);
+
+    const validImage = await readFile(path.join(projectRoot, "public/product-shirt.webp"));
+    const multipartOrder = new FormData();
+    multipartOrder.append("order", JSON.stringify(validOrderPayload));
+    multipartOrder.append("files", new File([validImage], "shirt-design.webp", { type: "image/webp" }));
+    const orderResponse = await fetch(`${baseUrl}/api/orders`, {
+      method: "POST",
+      body: multipartOrder,
     });
     assert.equal(orderResponse.status, 201);
     const createdOrder = await orderResponse.json();
@@ -155,6 +180,7 @@ test("renders the Printopus pages with the production Next.js server", { timeout
     assert.match(createdOrder.order.orderNumber, /^BY-\d{8}-[A-F0-9]{6}$/);
     assert.equal(createdOrder.order.discountPercent, 5);
     assert.equal(createdOrder.order.total, 494);
+    assert.equal(createdOrder.order.assetCount, 1);
 
     const database = new pg.Client({ connectionString: process.env.DATABASE_URL });
     await database.connect();
@@ -228,6 +254,19 @@ test("renders the Printopus pages with the production Next.js server", { timeout
     const orderDetails = await orderDetailsResponse.json();
     assert.equal(orderDetails.order.status, "CONFIRMED");
     assert.equal(orderDetails.order.statusHistory[0].note, "Проверка истории статусов");
+    const storedAsset = orderDetails.order.items[0].assets[0];
+    assert(storedAsset);
+    assert.equal(storedAsset.mimeType, "image/webp");
+    assert(storedAsset.width > 0 && storedAsset.height > 0);
+
+    const unauthorizedAssetResponse = await fetch(`${baseUrl}/api/admin/assets/${storedAsset.id}`);
+    assert.equal(unauthorizedAssetResponse.status, 401);
+    const assetResponse = await fetch(`${baseUrl}/api/admin/assets/${storedAsset.id}`, { headers: { cookie: sessionCookie } });
+    assert.equal(assetResponse.status, 200);
+    assert.equal(assetResponse.headers.get("content-type"), "image/webp");
+    assert.equal(assetResponse.headers.get("x-content-type-options"), "nosniff");
+    assert.match(assetResponse.headers.get("content-disposition") ?? "", /^attachment;/);
+    assert((await assetResponse.arrayBuffer()).byteLength > 1_000);
   } catch (error) {
     error.message += `\nNext.js output:\n${output}`;
     throw error;
@@ -251,5 +290,6 @@ test("renders the Printopus pages with the production Next.js server", { timeout
       server.kill("SIGTERM");
       await processExited;
     }
+    await rm(uploadRoot, { recursive: true, force: true });
   }
 });

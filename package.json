@@ -27,7 +27,8 @@
     "next": "^16.3.2",
     "pg": "^8.23.0",
     "react": "19.2.6",
-    "react-dom": "19.2.6"
+    "react-dom": "19.2.6",
+    "sharp": "^0.35.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "4.2.1",
@@ -43,5 +44,8 @@
     "typescript": "5.9.3"
   },
   "type": "module",
-  "displayName": "Принт Центр — печать на одежде"
+  "displayName": "Принт Центр — печать на одежде",
+  "overrides": {
+    "deepmerge-ts": "8.0.2"
+  }
 }

@@ -1,6 +1,6 @@
 # База данных Printopus
 
-Проект использует PostgreSQL и Prisma ORM. Локальная база запускается через `compose.yaml`.
+Проект использует PostgreSQL и Prisma ORM. Локальная база запускается через `compose.yaml`. В production база работает в закрытой Docker-сети VPS и не публикует порт 5432 наружу.
 
 ## Первый запуск
 
