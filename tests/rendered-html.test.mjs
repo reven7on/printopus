@@ -48,6 +48,8 @@ test("renders the Printopus pages with the production Next.js server", { timeout
   server.stderr.on("data", (chunk) => { output += chunk; });
   const processExited = new Promise((resolve) => server.once("exit", () => resolve("exited")));
   let createdOrderId = null;
+  let catalogProductId = null;
+  let createdDiscountId = null;
 
   try {
     const baseUrl = `http://127.0.0.1:${port}`;
@@ -85,6 +87,7 @@ test("renders the Printopus pages with the production Next.js server", { timeout
     assert.equal(robotsResponse.status, 200);
     const robots = await robotsResponse.text();
     assert.match(robots, /Allow: \//);
+    assert.match(robots, /Disallow: \/admin\//);
     assert.match(robots, /Sitemap: https:\/\/printservice\.by\/sitemap\.xml/);
 
     const sitemapResponse = await fetch(`${baseUrl}/sitemap.xml`);
@@ -104,6 +107,20 @@ test("renders the Printopus pages with the production Next.js server", { timeout
     assert.equal(catalog.currency, "BYN");
     assert.equal(catalog.products.find((product) => product.slug === "shirt")?.basePrice, 15);
     assert.deepEqual(catalog.volumeDiscounts.map((discount) => discount.minQuantity), [20, 50, 100, 200]);
+
+    const protectedPageResponse = await fetch(`${baseUrl}/admin`, { redirect: "manual" });
+    assert.equal(protectedPageResponse.status, 307);
+    assert.equal(protectedPageResponse.headers.get("location"), "/admin/login");
+
+    const unauthorizedOverview = await fetch(`${baseUrl}/api/admin/overview`);
+    assert.equal(unauthorizedOverview.status, 401);
+
+    const rejectedLogin = await fetch(`${baseUrl}/api/admin/session`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ username: process.env.ADMIN_USERNAME, password: process.env.ADMIN_PASSWORD }),
+    });
+    assert.equal(rejectedLogin.status, 403);
 
     const invalidOrderResponse = await fetch(`${baseUrl}/api/orders`, {
       method: "POST",
@@ -153,6 +170,64 @@ test("renders the Printopus pages with the production Next.js server", { timeout
     } finally {
       await database.end();
     }
+
+    const loginResponse = await fetch(`${baseUrl}/api/admin/session`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: baseUrl },
+      body: JSON.stringify({ username: process.env.ADMIN_USERNAME, password: process.env.ADMIN_PASSWORD }),
+    });
+    assert.equal(loginResponse.status, 200);
+    const sessionCookie = loginResponse.headers.get("set-cookie")?.split(";", 1)[0];
+    assert(sessionCookie?.startsWith("printopus_admin_session="));
+
+    const adminPageResponse = await fetch(`${baseUrl}/admin`, { headers: { cookie: sessionCookie } });
+    assert.equal(adminPageResponse.status, 200);
+    assert.match(await adminPageResponse.text(), /Панель управления|Загружаем рабочее пространство/i);
+
+    const adminOverviewResponse = await fetch(`${baseUrl}/api/admin/overview`, { headers: { cookie: sessionCookie } });
+    assert.equal(adminOverviewResponse.status, 200);
+
+    const adminCatalogResponse = await fetch(`${baseUrl}/api/admin/catalog`, { headers: { cookie: sessionCookie } });
+    assert.equal(adminCatalogResponse.status, 200);
+    const adminCatalog = await adminCatalogResponse.json();
+    const adminShirt = adminCatalog.products.find((product) => product.slug === "shirt");
+    assert(adminShirt);
+    catalogProductId = adminShirt.id;
+
+    const rejectedCatalogUpdate = await fetch(`${baseUrl}/api/admin/catalog`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie: sessionCookie },
+      body: JSON.stringify({ resource: "product", id: adminShirt.id, changes: { basePrice: adminShirt.basePrice } }),
+    });
+    assert.equal(rejectedCatalogUpdate.status, 403);
+
+    const catalogUpdate = await fetch(`${baseUrl}/api/admin/catalog`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie: sessionCookie, origin: baseUrl },
+      body: JSON.stringify({ resource: "product", id: adminShirt.id, changes: { basePrice: adminShirt.basePrice } }),
+    });
+    assert.equal(catalogUpdate.status, 200);
+
+    const discountResponse = await fetch(`${baseUrl}/api/admin/catalog`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: sessionCookie, origin: baseUrl },
+      body: JSON.stringify({ resource: "discount", data: { minQuantity: 777, percent: 3 } }),
+    });
+    assert.equal(discountResponse.status, 201);
+    createdDiscountId = (await discountResponse.json()).item.id;
+
+    const statusResponse = await fetch(`${baseUrl}/api/admin/orders/${createdOrderId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie: sessionCookie, origin: baseUrl },
+      body: JSON.stringify({ status: "CONFIRMED", note: "Проверка истории статусов" }),
+    });
+    assert.equal(statusResponse.status, 200);
+
+    const orderDetailsResponse = await fetch(`${baseUrl}/api/admin/orders/${createdOrderId}`, { headers: { cookie: sessionCookie } });
+    assert.equal(orderDetailsResponse.status, 200);
+    const orderDetails = await orderDetailsResponse.json();
+    assert.equal(orderDetails.order.status, "CONFIRMED");
+    assert.equal(orderDetails.order.statusHistory[0].note, "Проверка истории статусов");
   } catch (error) {
     error.message += `\nNext.js output:\n${output}`;
     throw error;
@@ -161,6 +236,12 @@ test("renders the Printopus pages with the production Next.js server", { timeout
       const database = new pg.Client({ connectionString: process.env.DATABASE_URL });
       await database.connect();
       try {
+        await database.query('DELETE FROM admin_audit_log WHERE "entityId" = $1', [createdOrderId]);
+        if (catalogProductId) await database.query('DELETE FROM admin_audit_log WHERE "entityId" = $1', [catalogProductId]);
+        if (createdDiscountId) {
+          await database.query('DELETE FROM admin_audit_log WHERE "entityId" = $1', [createdDiscountId]);
+          await database.query("DELETE FROM volume_discounts WHERE id = $1", [createdDiscountId]);
+        }
         await database.query("DELETE FROM orders WHERE id = $1", [createdOrderId]);
       } finally {
         await database.end();

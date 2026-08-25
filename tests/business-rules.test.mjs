@@ -8,6 +8,7 @@ import {
   OrderInputError,
   parseCreateOrderInput,
 } from "../lib/order-domain.ts";
+import { createAdminSessionToken, readAdminSessionToken } from "../lib/admin-session.ts";
 import { getQuantityDiscount, PRINT_FORMATS, PRODUCT_BASE_PRICES } from "../app/pricing.ts";
 
 test("volume discount boundaries match the public offer", () => {
@@ -115,4 +116,14 @@ test("server quote calculation uses authoritative prices and quantity discount",
     discountPercent: 5,
     total: 494,
   });
+});
+
+test("admin session tokens are signed and expire", () => {
+  const secret = "a-secure-test-secret-with-more-than-32-characters";
+  const now = Date.UTC(2026, 7, 25, 10, 0, 0);
+  const token = createAdminSessionToken("manager", secret, now);
+
+  assert.equal(readAdminSessionToken(token, secret, now + 60_000)?.username, "manager");
+  assert.equal(readAdminSessionToken(`${token}changed`, secret, now), null);
+  assert.equal(readAdminSessionToken(token, secret, now + 9 * 60 * 60_000), null);
 });

@@ -10,6 +10,7 @@ import {
   PRINT_FORMATS,
   PRODUCT_BASE_PRICES,
 } from "./pricing";
+import { usePublicCatalog } from "./use-public-catalog";
 
 function Icon({ name }: { name: string }) {
   const shapes: Record<string, ReactNode> = {
@@ -137,14 +138,14 @@ const portfolioItems = [
   },
 ];
 
-const basePrices = [
+const fallbackBasePrices = [
   { title: "Футболка", note: "Классическая модель из хлопка", price: PRODUCT_BASE_PRICES.shirt, image: "/product-shirt.webp" },
   { title: "Худи", note: "Утеплённая модель с капюшоном", price: PRODUCT_BASE_PRICES.hoodie, image: "/product-hoodie.webp" },
   { title: "Кепка", note: "Классическая шестипанельная", price: PRODUCT_BASE_PRICES.cap, image: "/product-cap.webp" },
   { title: "Шопер", note: "Плотный натуральный хлопок", price: PRODUCT_BASE_PRICES.bag, image: "/product-shopper.webp" },
 ];
 
-const printPrices = PRINT_FORMATS.map((format) => ({
+const fallbackPrintPrices = PRINT_FORMATS.map((format) => ({
   size: format.id,
   dimensions: format.dimensions,
   label: format.landingLabel,
@@ -194,12 +195,36 @@ function FormatShirtIcon({ scale, size }: { scale: string; size: string }) {
 }
 
 export default function Home() {
+  const publicCatalog = usePublicCatalog();
   const [menuOpen, setMenuOpen] = useState(false);
   const [showMobileCta, setShowMobileCta] = useState(true);
   const [active, setActive] = useState("products");
   const [catalogProduct, setCatalogProduct] = useState(0);
   const [priceProduct, setPriceProduct] = useState(0);
   const [priceFormat, setPriceFormat] = useState(3);
+
+  const basePrices = fallbackBasePrices.map((item) => {
+    const slug = item.title === "Футболка" ? "shirt" : item.title === "Худи" ? "hoodie" : item.title === "Кепка" ? "cap" : "bag";
+    const databaseProduct = publicCatalog?.products.find((product) => product.slug === slug);
+    return databaseProduct ? { ...item, title: databaseProduct.name, note: databaseProduct.description ?? item.note, price: databaseProduct.basePrice } : item;
+  });
+  const printMethodPrice = publicCatalog?.printMethods.find((method) => method.slug === "dtf")?.priceDelta ?? DEFAULT_PRINT_METHOD_PRICE;
+  const printPrices = publicCatalog?.printFormats.length
+    ? publicCatalog.printFormats.map((format, index) => {
+      const fallback = PRINT_FORMATS.find((item) => item.id === format.code) ?? PRINT_FORMATS[Math.min(index, PRINT_FORMATS.length - 1)];
+      return {
+        size: format.code,
+        dimensions: `${format.widthCm.toString().replace(".", ",")} × ${format.heightCm.toString().replace(".", ",")} см`,
+        label: fallback.landingLabel,
+        price: printMethodPrice + format.priceDelta,
+        scale: fallback.scale,
+      };
+    })
+    : fallbackPrintPrices;
+  const firstDiscountQuantity = publicCatalog?.volumeDiscounts[0]?.minQuantity ?? FIRST_VOLUME_DISCOUNT_QUANTITY;
+  const maxDiscountPercent = publicCatalog?.volumeDiscounts.at(-1)?.percent ?? MAX_VOLUME_DISCOUNT_PERCENT;
+  const selectedBasePrice = basePrices[priceProduct] ?? basePrices[0];
+  const selectedPrintPrice = printPrices[priceFormat] ?? printPrices[0];
 
   useEffect(() => {
     const onScroll = () => setShowMobileCta(window.scrollY > 80);
@@ -406,7 +431,7 @@ export default function Home() {
           <div className="cost-heading">
             <p>Честная стоимость без скрытых наценок</p>
             <h2>Прозрачный расчёт цен</h2>
-            <span>Единая стоимость изделия и нанесения. При заказе от {FIRST_VOLUME_DISCOUNT_QUANTITY} штук — оптовые скидки до -{MAX_VOLUME_DISCOUNT_PERCENT}%.</span>
+            <span>Единая стоимость изделия и нанесения. При заказе от {firstDiscountQuantity} штук — оптовые скидки до -{maxDiscountPercent}%.</span>
           </div>
           <div className="cost-row cost-products-row">
             <div className="cost-side"><Icon name="shirt"/><b>Базовые изделия</b><span>Цена за изделие<br/>без нанесения.</span></div>
@@ -427,13 +452,13 @@ export default function Home() {
 
             <div className="cost-summary-body">
               <div className="cost-summary-line">
-                <Image src={basePrices[priceProduct].image} alt="" className="cost-line-img" width={1000} height={1000} sizes="64px" />
+                <Image src={selectedBasePrice.image} alt="" className="cost-line-img" width={1000} height={1000} sizes="64px" />
                 <div className="cost-line-text">
                   <small>Выбранное изделие</small>
-                  <b>{basePrices[priceProduct].title}</b>
-                  <span className="cost-line-note">{basePrices[priceProduct].note}</span>
+                  <b>{selectedBasePrice.title}</b>
+                  <span className="cost-line-note">{selectedBasePrice.note}</span>
                 </div>
-                <strong className="cost-line-price">{basePrices[priceProduct].price} BYN</strong>
+                <strong className="cost-line-price">{selectedBasePrice.price} BYN</strong>
               </div>
 
               <div className="cost-summary-plus" aria-hidden="true">+</div>
@@ -443,18 +468,18 @@ export default function Home() {
                   <Icon name="shirt" />
                 </div>
                 <div className="cost-line-text">
-                  <small>Зона печати ({printPrices[priceFormat].size})</small>
-                  <b>{printPrices[priceFormat].label}</b>
-                  <span className="cost-line-note">{printPrices[priceFormat].dimensions}</span>
+                  <small>Зона печати ({selectedPrintPrice.size})</small>
+                  <b>{selectedPrintPrice.label}</b>
+                  <span className="cost-line-note">{selectedPrintPrice.dimensions}</span>
                 </div>
-                <strong className="cost-line-price">{printPrices[priceFormat].price} BYN</strong>
+                <strong className="cost-line-price">{selectedPrintPrice.price} BYN</strong>
               </div>
             </div>
 
             <div className="cost-summary-footer">
               <div className="cost-total-group">
                 <small>Предварительная стоимость за 1 шт. от</small>
-                <strong>{basePrices[priceProduct].price + printPrices[priceFormat].price} BYN</strong>
+                <strong>{selectedBasePrice.price + selectedPrintPrice.price} BYN</strong>
               </div>
               <a href="/configurator" className="button">
                 Оформить в конструкторе <Icon name="arrow" />

@@ -1,7 +1,7 @@
 "use client";
 
 import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode } from "react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import NextImage from "next/image";
 import Link from "next/link";
 import {
@@ -12,6 +12,7 @@ import {
   PRODUCT_BASE_PRICES,
 } from "../pricing";
 import { isValidBelarusianPhone } from "../order-validation";
+import { usePublicCatalog } from "../use-public-catalog";
 import { getAutomaticPrintEstimate } from "./editor-math";
 
 type ItemId = "shirt" | "hoodie" | "polo" | "cap" | "bag";
@@ -207,9 +208,9 @@ const garmentColors = [
 ];
 
 const garmentSizesByItem: Record<ItemId, readonly { id: string; label: string }[]> = {
-  shirt: ["XS", "S", "M", "L", "XL", "2XL", "3XL"].map((size) => ({ id: size, label: size })),
-  hoodie: ["XS", "S", "M", "L", "XL", "2XL", "3XL"].map((size) => ({ id: size, label: size })),
-  polo: ["S", "M", "L", "XL", "2XL", "3XL"].map((size) => ({ id: size, label: size })),
+  shirt: ["XS", "S", "M", "L", "XL", "2XL", "3XL"].map((size) => ({ id: size.toLowerCase(), label: size })),
+  hoodie: ["XS", "S", "M", "L", "XL", "2XL", "3XL"].map((size) => ({ id: size.toLowerCase(), label: size })),
+  polo: ["S", "M", "L", "XL", "2XL", "3XL"].map((size) => ({ id: size.toLowerCase(), label: size })),
   cap: [{ id: "universal", label: "Универсальный" }],
   bag: [{ id: "one-size", label: "Один размер" }],
 };
@@ -247,8 +248,6 @@ const methods = {
     tags: ["Логотипы", "Максимальная стойкость"],
   },
 };
-
-const printSizes = PRINT_FORMATS;
 
 const quantityPresets = [1, 10, 20, 50, 100, 200] as const;
 
@@ -616,7 +615,7 @@ function getMockupPath(itemKey: ItemId, colorKey: string, viewAngleKey: ViewAngl
   return `/mockups/spreadshirt/${prodFolder}/${prodFolder}-${finalColor}-${viewSlug}.png`;
 }
 
-function getAvailableColorsForItem(itemKey: ItemId) {
+function getFallbackColorsForItem(itemKey: ItemId) {
   const prodFolder = itemKey === "shirt" ? "tshirt" : itemKey;
   const availMap: Record<string, string[]> = {
     tshirt: ["white", "black", "khaki", "grey", "navy", "red", "burgundy"],
@@ -630,12 +629,13 @@ function getAvailableColorsForItem(itemKey: ItemId) {
 }
 
 export default function Configurator() {
+  const publicCatalog = usePublicCatalog();
   const [currentStep, setCurrentStep] = useState(1);
   const [item, setItem] = useState<ItemId>("shirt");
   const [color, setColor] = useState("khaki");
-  const [garmentSize, setGarmentSize] = useState("M");
+  const [garmentSize, setGarmentSize] = useState("m");
   const [viewAngle, setViewAngle] = useState<ViewAngle>("front");
-  const [method, setMethod] = useState<keyof typeof methods>("dtf");
+  const [method, setMethod] = useState("dtf");
   const [placement, setPlacement] = useState<PlacementId>("center");
   const [qty, setQty] = useState(30);
   
@@ -668,14 +668,70 @@ export default function Configurator() {
   const quickTextEditBeforeRef = useRef<DesignsByView | null>(null);
   const nextElementIdRef = useRef(0);
 
-  const selectedItem = items.find((i) => i.id === item)!;
-  const selectedColor = garmentColors.find((c) => c.id === color)!;
-  const availableGarmentSizes = garmentSizesByItem[item];
+  function resolveColors(itemKey: ItemId) {
+    const product = publicCatalog?.products.find((entry) => entry.slug === itemKey);
+    const options = product?.options.filter((option) => option.type === "COLOR") ?? [];
+    if (!options.length) return getFallbackColorsForItem(itemKey);
+    return options.map((option) => {
+      const fallback = garmentColors.find((entry) => entry.id === option.value);
+      const hex = option.colorHex ?? fallback?.hex ?? "#d4d4d4";
+      return { id: option.value, label: option.label, hex, border: fallback?.border ?? hex, add: option.priceDelta };
+    });
+  }
+
+  function resolveSizes(itemKey: ItemId) {
+    const product = publicCatalog?.products.find((entry) => entry.slug === itemKey);
+    const options = product?.options.filter((option) => option.type === "SIZE") ?? [];
+    return options.length ? options.map((option) => ({ id: option.value, label: option.label })) : garmentSizesByItem[itemKey];
+  }
+
+  const availableItems = useMemo(() => items.filter((itemTemplate) => (
+    !publicCatalog || publicCatalog.products.some((entry) => entry.slug === itemTemplate.id)
+  )).map((itemTemplate) => {
+    const product = publicCatalog?.products.find((entry) => entry.slug === itemTemplate.id);
+    return product ? { ...itemTemplate, label: product.name, note: product.description ?? itemTemplate.note, base: product.basePrice } : itemTemplate;
+  }), [publicCatalog]);
+  useEffect(() => {
+    if (availableItems.length && !availableItems.some((entry) => entry.id === item)) {
+      // The catalog may deactivate the currently selected product between visits.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setItem(availableItems[0].id);
+    }
+  }, [availableItems, item]);
+  const selectedItem = availableItems.find((i) => i.id === item) ?? availableItems[0];
+  const availableColors = resolveColors(item);
+  const selectedColor = availableColors.find((c) => c.id === color) ?? availableColors[0];
+  const availableGarmentSizes = resolveSizes(item);
   const selectedGarmentSize = availableGarmentSizes.find((size) => size.id === garmentSize) ?? availableGarmentSizes[0];
-  const printEstimate = useMemo(
-    () => getAutomaticPrintEstimate(designs, item, printZoneDimensionsCm, printSizes),
-    [designs, item],
-  );
+  const availableMethods = publicCatalog?.printMethods.length
+    ? publicCatalog.printMethods.map((entry) => {
+      const fallback = methods[entry.slug as keyof typeof methods];
+      return {
+        id: entry.slug,
+        label: entry.name,
+        desc: entry.description ?? fallback?.desc ?? "Способ нанесения",
+        add: entry.priceDelta,
+        icon: fallback?.icon ?? "layers",
+        tags: fallback?.tags ?? [],
+      };
+    })
+    : Object.entries(methods).map(([id, entry]) => ({ id, ...entry }));
+  const selectedMethod = availableMethods.find((entry) => entry.id === method) ?? availableMethods[0];
+  const availablePrintSizes = useMemo(() => publicCatalog && publicCatalog.printFormats.length >= 4
+    ? publicCatalog.printFormats.map((format, index) => {
+      const fallback = PRINT_FORMATS.find((entry) => entry.id === format.code) ?? PRINT_FORMATS[Math.min(index, PRINT_FORMATS.length - 1)];
+      return {
+        ...fallback,
+        id: format.code,
+        label: format.code,
+        dimensions: `${format.widthCm.toString().replace(".", ",")} × ${format.heightCm.toString().replace(".", ",")} см`,
+        width: format.widthCm,
+        height: format.heightCm,
+        add: format.priceDelta,
+      };
+    })
+    : [...PRINT_FORMATS], [publicCatalog]);
+  const printEstimate = getAutomaticPrintEstimate(designs, item, printZoneDimensionsCm, availablePrintSizes);
   const selectedSize = printEstimate.size;
   const selectedPlacement = placements.find((p) => p.id === placement)!;
   const activeStep = steps.find((s) => s.n === currentStep)!;
@@ -698,11 +754,21 @@ export default function Configurator() {
     ? currentPrintZone.width / currentPrintZone.canvas < 0.2 || currentPrintZone.height / currentPrintZone.canvas < 0.2
     : false;
   const designElementsCount = Object.values(designs).reduce((total, elements) => total + elements.length, 0);
-  const discount = getQuantityDiscount(qty);
+  const discount = publicCatalog?.volumeDiscounts.length
+    ? (() => {
+      const current = [...publicCatalog.volumeDiscounts].reverse().find((entry) => qty >= entry.minQuantity);
+      const next = publicCatalog.volumeDiscounts.find((entry) => qty < entry.minQuantity);
+      const percent = current?.percent ?? 0;
+      return { percent, multiplier: 1 - percent / 100, nextAt: next?.minQuantity ?? null };
+    })()
+    : getQuantityDiscount(qty);
+  const discountMilestones = publicCatalog?.volumeDiscounts.length
+    ? [1, ...publicCatalog.volumeDiscounts.map((entry) => entry.minQuantity)]
+    : [1, 20, 50, 100, 200];
   const hasRasterArtwork = Object.values(designs).some((elements) => (
     elements.some((element) => element.type === "image" && element.quality !== "vector")
   ));
-  const recommendedMethod: keyof typeof methods = item === "cap" && designElementsCount > 0 && !hasRasterArtwork
+  const recommendedMethod = item === "cap" && designElementsCount > 0 && !hasRasterArtwork
     ? "embroidery"
     : hasRasterArtwork
       ? "dtf"
@@ -711,14 +777,12 @@ export default function Configurator() {
         : "dtf";
 
   // Authentic Spreadshirt PNG mockups mapped per product, color & view
-  const currentMockupImage = useMemo(() => {
-    return getMockupPath(item, color, viewAngle);
-  }, [item, color, viewAngle]);
+  const currentMockupImage = getMockupPath(item, selectedColor.id, viewAngle);
 
-  const unitPrice = useMemo(() => {
-    const baseUnit = selectedItem.base + selectedColor.add + methods[method].add + selectedSize.add;
-    return +(baseUnit * getQuantityDiscount(qty).multiplier).toFixed(2);
-  }, [selectedItem, selectedColor, method, selectedSize, qty]);
+  const unitPrice = (() => {
+    const baseUnit = selectedItem.base + selectedColor.add + selectedMethod.add + selectedSize.add;
+    return +(baseUnit * discount.multiplier).toFixed(2);
+  })();
 
   const totalPrice = +(unitPrice * qty).toFixed(2);
 
@@ -1125,9 +1189,9 @@ export default function Configurator() {
           deliveryAddress: fulfillmentMethod === "delivery" ? deliveryAddress : null,
           comment: customerComment,
           productSlug: item,
-          color,
+          color: selectedColor.id,
           size: selectedGarmentSize.id,
-          printMethodSlug: method,
+          printMethodSlug: selectedMethod.id,
           printFormatCode: selectedSize.id,
           placement,
           quantity: qty,
@@ -1160,7 +1224,7 @@ export default function Configurator() {
     setCurrentStep(1);
     setItem("shirt");
     setColor("khaki");
-    setGarmentSize("M");
+    setGarmentSize("m");
     setViewAngle("front");
     setMethod("dtf");
     setPlacement("center");
@@ -1737,15 +1801,15 @@ export default function Configurator() {
               </div>
 
               <div className="product-tiles-grid">
-                {items.map((i) => (
+                {availableItems.map((i) => (
                   <button
                     key={i.id}
                     className={`product-tile catalog-card ${item === i.id ? "selected" : ""}`}
                     onClick={() => {
                       setItem(i.id);
-                      const nextSizes = garmentSizesByItem[i.id];
-                      setGarmentSize(nextSizes.find((size) => size.id === "M")?.id ?? nextSizes[0].id);
-                      const availColors = getAvailableColorsForItem(i.id);
+                      const nextSizes = resolveSizes(i.id);
+                      setGarmentSize(nextSizes.find((size) => size.id === "m")?.id ?? nextSizes[0].id);
+                      const availColors = resolveColors(i.id);
                       if (!availColors.some((c) => c.id === color)) {
                         setColor(availColors[0].id);
                       }
@@ -1793,7 +1857,7 @@ export default function Configurator() {
                   <span className="selected-color-preview" style={{ backgroundColor: selectedColor.hex, borderColor: selectedColor.border }} aria-hidden="true" />
                 </div>
                 <div className="product-color-grid">
-                  {getAvailableColorsForItem(item).map((c) => (
+                  {availableColors.map((c) => (
                     <button
                       key={c.id}
                       className={`product-color-option ${color === c.id ? "selected" : ""}`}
@@ -2109,19 +2173,19 @@ export default function Configurator() {
                   <span>Цена указана за одно изделие</span>
                 </div>
                 <div className="methods-stack">
-                  {Object.entries(methods).map(([key, m]) => (
+                  {availableMethods.map((m) => (
                     <button
-                      key={key}
+                      key={m.id}
                       type="button"
-                      className={`method-select-card ${method === key ? "selected" : ""}`}
-                      onClick={() => setMethod(key as keyof typeof methods)}
-                      aria-pressed={method === key}
+                      className={`method-select-card ${selectedMethod.id === m.id ? "selected" : ""}`}
+                      onClick={() => setMethod(m.id)}
+                      aria-pressed={selectedMethod.id === m.id}
                     >
                       <span className="method-icon"><ConfigIcon name={m.icon} size={22}/></span>
                       <div className="method-copy">
                         <span className="method-title-row">
                           <b>{m.label}</b>
-                          {recommendedMethod === key && <em>Рекомендуем</em>}
+                          {recommendedMethod === m.id && <em>Рекомендуем</em>}
                         </span>
                         <small>{m.desc}</small>
                         <span className="method-tags">
@@ -2131,7 +2195,7 @@ export default function Configurator() {
                       <div className="method-choice">
                         <span className="method-add-badge">+{m.add} BYN</span>
                         <span className="method-radio" aria-hidden="true">
-                          {method === key && <ConfigIcon name="check" size={14}/>}
+                          {selectedMethod.id === m.id && <ConfigIcon name="check" size={14}/>}
                         </span>
                       </div>
                     </button>
@@ -2205,10 +2269,10 @@ export default function Configurator() {
                     {discount.nextAt && <span>Ещё {discount.nextAt - qty} шт. до следующей скидки</span>}
                   </div>
                   <div className="quantity-discount-scale" aria-label="Пороговые значения скидки">
-                    {[1, 20, 50, 100, 200].map((milestone) => (
+                    {discountMilestones.map((milestone, index) => (
                       <span key={milestone} className={qty >= milestone ? "active" : ""}>
                         <i />
-                        <small>{milestone}{milestone === 200 ? "+" : ""}</small>
+                        <small>{milestone}{index === discountMilestones.length - 1 ? "+" : ""}</small>
                       </span>
                     ))}
                   </div>
@@ -2261,7 +2325,7 @@ export default function Configurator() {
                       </div>
                       <div className="checkout-summary-item">
                         <span className="checkout-summary-icon"><ConfigIcon name="layers" size={19}/></span>
-                        <div><small>Печать и тираж</small><b>{methods[method].label} · {selectedSize.label} · {qty} шт.</b></div>
+                        <div><small>Печать и тираж</small><b>{selectedMethod.label} · {selectedSize.label} · {qty} шт.</b></div>
                         <button type="button" onClick={() => setCurrentStep(4)} aria-label="Изменить печать и тираж" title="Изменить печать и тираж"><ConfigIcon name="edit" size={16}/></button>
                       </div>
                     </div>
