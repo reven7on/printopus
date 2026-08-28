@@ -36,8 +36,9 @@ const products = [
   {
     title: "Футболки и поло",
     copy: "Плотный хлопок 180–240 г/м². Классическая или свободная посадка.",
-    image: "/product-shirt.webp",
+    image: "/product-shirt-v2.webp",
     kind: "shirt",
+    catalogSlugs: ["shirt", "polo"],
     methods: [
       ["DTF-печать", "Перед, спина и рукава"],
       ["Шелкография", "Для ярких тиражей от 20 штук"],
@@ -55,8 +56,9 @@ const products = [
   {
     title: "Толстовки и худи",
     copy: "Тёплый футер 320–380 г/м². Подходит для вышивки и крупных принтов.",
-    image: "/product-hoodie.webp",
+    image: "/product-hoodie-v2.webp",
     kind: "hoodie",
+    catalogSlugs: ["hoodie"],
     methods: [
       ["DTF-печать", "Грудь, спина и рукава"],
       ["Шелкография", "Перед и спина для средних тиражей"],
@@ -74,8 +76,9 @@ const products = [
   {
     title: "Головные уборы",
     copy: "Бейсболки и шапки с плоской, объёмной вышивкой или шевронами.",
-    image: "/product-cap.webp",
+    image: "/product-cap-v2.webp",
     kind: "cap",
+    catalogSlugs: ["cap"],
     methods: [
       ["Плоская вышивка", "Спереди, сбоку или сзади"],
       ["3D-вышивка", "Объёмный логотип на фронтальной панели"],
@@ -93,8 +96,9 @@ const products = [
   {
     title: "Шоперы и сумки",
     copy: "Канвас 280 г/м². Большая зона печати и усиленные длинные ручки.",
-    image: "/product-shopper.webp",
+    image: "/product-shopper-v2.webp",
     kind: "bag",
+    catalogSlugs: ["bag"],
     methods: [
       ["Шелкография", "Одна или две стороны, выгодно для тиража"],
       ["DTF-печать", "Полноцветные изображения и градиенты"],
@@ -139,10 +143,10 @@ const portfolioItems = [
 ];
 
 const fallbackBasePrices = [
-  { title: "Футболка", note: "Классическая модель из хлопка", price: PRODUCT_BASE_PRICES.shirt, image: "/product-shirt.webp" },
-  { title: "Худи", note: "Утеплённая модель с капюшоном", price: PRODUCT_BASE_PRICES.hoodie, image: "/product-hoodie.webp" },
-  { title: "Кепка", note: "Классическая шестипанельная", price: PRODUCT_BASE_PRICES.cap, image: "/product-cap.webp" },
-  { title: "Шопер", note: "Плотный натуральный хлопок", price: PRODUCT_BASE_PRICES.bag, image: "/product-shopper.webp" },
+  { slug: "shirt", title: "Футболка", note: "Классическая модель из хлопка", price: PRODUCT_BASE_PRICES.shirt, image: "/product-shirt-v2.webp" },
+  { slug: "hoodie", title: "Худи", note: "Утеплённая модель с капюшоном", price: PRODUCT_BASE_PRICES.hoodie, image: "/product-hoodie-v2.webp" },
+  { slug: "cap", title: "Кепка", note: "Классическая шестипанельная", price: PRODUCT_BASE_PRICES.cap, image: "/product-cap-v2.webp" },
+  { slug: "bag", title: "Шопер", note: "Плотный натуральный хлопок", price: PRODUCT_BASE_PRICES.bag, image: "/product-shopper-v2.webp" },
 ];
 
 const fallbackPrintPrices = PRINT_FORMATS.map((format) => ({
@@ -195,36 +199,52 @@ function FormatShirtIcon({ scale, size }: { scale: string; size: string }) {
 }
 
 export default function Home() {
-  const publicCatalog = usePublicCatalog();
+  const { catalog: publicCatalog, status: publicCatalogStatus } = usePublicCatalog();
   const [menuOpen, setMenuOpen] = useState(false);
   const [showMobileCta, setShowMobileCta] = useState(true);
   const [active, setActive] = useState("products");
-  const [catalogProduct, setCatalogProduct] = useState(0);
+  const [catalogProduct, setCatalogProduct] = useState<number | null>(null);
   const [priceProduct, setPriceProduct] = useState(0);
   const [priceFormat, setPriceFormat] = useState(3);
 
-  const basePrices = fallbackBasePrices.map((item) => {
-    const slug = item.title === "Футболка" ? "shirt" : item.title === "Худи" ? "hoodie" : item.title === "Кепка" ? "cap" : "bag";
-    const databaseProduct = publicCatalog?.products.find((product) => product.slug === slug);
-    return databaseProduct ? { ...item, title: databaseProduct.name, note: databaseProduct.description ?? item.note, price: databaseProduct.basePrice } : item;
-  });
-  const printMethodPrice = publicCatalog?.printMethods.find((method) => method.slug === "dtf")?.priceDelta ?? DEFAULT_PRINT_METHOD_PRICE;
-  const printPrices = publicCatalog?.printFormats.length
-    ? publicCatalog.printFormats.map((format, index) => {
+  const catalogReady = publicCatalogStatus === "ready";
+  const visibleProducts = catalogReady
+    ? products.filter((item) => item.catalogSlugs.some((slug) => publicCatalog?.products.some((product) => product.slug === slug)))
+    : products;
+  const basePrices = catalogReady
+    ? fallbackBasePrices.flatMap((item) => {
+      const databaseProduct = publicCatalog?.products.find((product) => product.slug === item.slug);
+      return databaseProduct
+        ? [{ ...item, title: databaseProduct.name, note: databaseProduct.description ?? item.note, price: databaseProduct.basePrice }]
+        : [];
+    })
+    : fallbackBasePrices;
+  const safePriceProduct = basePrices[priceProduct] ? priceProduct : 0;
+  const selectedBasePrice = basePrices[safePriceProduct];
+  const selectedCatalogPriceProduct = catalogReady
+    ? publicCatalog?.products.find((product) => product.slug === selectedBasePrice?.slug)
+    : null;
+  const selectedPrintMethod = catalogReady
+    ? selectedCatalogPriceProduct?.printMethods.find((method) => method.slug === "dtf") ?? selectedCatalogPriceProduct?.printMethods[0]
+    : { slug: "dtf", name: "DTF-печать", description: null, priceDelta: DEFAULT_PRINT_METHOD_PRICE, formats: fallbackPrintPrices.map((format) => ({ code: format.size, widthCm: 0, heightCm: 0, priceDelta: format.price - DEFAULT_PRINT_METHOD_PRICE })) };
+  const printPrices = catalogReady && selectedPrintMethod
+    ? selectedPrintMethod.formats.map((format, index) => {
       const fallback = PRINT_FORMATS.find((item) => item.id === format.code) ?? PRINT_FORMATS[Math.min(index, PRINT_FORMATS.length - 1)];
       return {
         size: format.code,
         dimensions: `${format.widthCm.toString().replace(".", ",")} × ${format.heightCm.toString().replace(".", ",")} см`,
         label: fallback.landingLabel,
-        price: printMethodPrice + format.priceDelta,
+        price: selectedPrintMethod.priceDelta + format.priceDelta,
         scale: fallback.scale,
       };
     })
-    : fallbackPrintPrices;
-  const firstDiscountQuantity = publicCatalog?.volumeDiscounts[0]?.minQuantity ?? FIRST_VOLUME_DISCOUNT_QUANTITY;
-  const maxDiscountPercent = publicCatalog?.volumeDiscounts.at(-1)?.percent ?? MAX_VOLUME_DISCOUNT_PERCENT;
-  const selectedBasePrice = basePrices[priceProduct] ?? basePrices[0];
-  const selectedPrintPrice = printPrices[priceFormat] ?? printPrices[0];
+    : catalogReady ? [] : fallbackPrintPrices;
+  const firstDiscountQuantity = catalogReady ? publicCatalog?.volumeDiscounts[0]?.minQuantity : FIRST_VOLUME_DISCOUNT_QUANTITY;
+  const maxDiscountPercent = catalogReady ? publicCatalog?.volumeDiscounts.at(-1)?.percent : MAX_VOLUME_DISCOUNT_PERCENT;
+  const hasVolumeDiscounts = firstDiscountQuantity !== undefined && maxDiscountPercent !== undefined;
+  const safeCatalogProduct = catalogProduct !== null && visibleProducts[catalogProduct] ? catalogProduct : null;
+  const safePriceFormat = printPrices[priceFormat] ? priceFormat : 0;
+  const selectedPrintPrice = printPrices[safePriceFormat];
 
   useEffect(() => {
     const onScroll = () => setShowMobileCta(window.scrollY > 80);
@@ -255,7 +275,7 @@ export default function Home() {
   }, []);
 
   const nav = [["products", "Продукция"], ["prices", "Цены"], ["works", "Примеры работ"], ["how-it-works", "Как заказать"], ["contacts", "Контакты"]];
-  const selectedCatalogProduct = products[catalogProduct];
+  const selectedCatalogProduct = safeCatalogProduct === null ? null : visibleProducts[safeCatalogProduct];
 
   return (
     <main className="landing">
@@ -353,12 +373,12 @@ export default function Home() {
           <a href="/configurator">Рассчитать свой макет <Icon name="arrow"/></a>
         </div>
         <div className="lp-products product-browser-grid">
-          {products.map((p, index) => (
+          {visibleProducts.map((p, index) => (
             <button
               type="button"
-              className={`lp-product ${p.kind} ${catalogProduct === index ? "selected" : ""}`}
-              aria-pressed={catalogProduct === index}
-              onClick={() => setCatalogProduct(index)}
+              className={`lp-product ${p.kind} ${safeCatalogProduct === index ? "selected" : ""}`}
+              aria-pressed={safeCatalogProduct === index}
+              onClick={() => setCatalogProduct((current) => current === index ? null : index)}
               style={{ order: index * 2 }}
               key={p.title}
             >
@@ -370,7 +390,7 @@ export default function Home() {
               <Image className="product-photo" src={p.image} alt={p.title} fill sizes="(max-width: 760px) calc(100vw - 32px), (max-width: 1200px) 50vw, 25vw" />
             </button>
           ))}
-          <div className="product-detail-panel" style={{ order: catalogProduct * 2 + 1 }} aria-live="polite">
+          {selectedCatalogProduct ? <div className="product-detail-panel" style={{ order: (safeCatalogProduct ?? 0) * 2 + 1 }} aria-live="polite">
             <div className="product-detail-topline">
               <div>
                 <small>Паспорт изделия</small>
@@ -422,7 +442,10 @@ export default function Home() {
                 </div>
               </article>
             </div>
-          </div>
+          </div> : visibleProducts.length === 0 ? <div className="landing-catalog-empty" aria-live="polite">
+            <b>Ассортимент временно недоступен</b>
+            <span>Уточните доступные изделия у менеджера — мы поможем подобрать основу под ваш макет.</span>
+          </div> : null}
         </div>
       </section>
 
@@ -431,17 +454,23 @@ export default function Home() {
           <div className="cost-heading">
             <p>Честная стоимость без скрытых наценок</p>
             <h2>Прозрачный расчёт цен</h2>
-            <span>Единая стоимость изделия и нанесения. При заказе от {firstDiscountQuantity} штук — оптовые скидки до -{maxDiscountPercent}%.</span>
+            <span>{hasVolumeDiscounts
+              ? `Единая стоимость изделия и нанесения. При заказе от ${firstDiscountQuantity} штук — оптовые скидки до -${maxDiscountPercent}%.`
+              : "Единая стоимость изделия и нанесения. Актуальные условия для тиража уточнит менеджер."}</span>
           </div>
           <div className="cost-row cost-products-row">
             <div className="cost-side"><Icon name="shirt"/><b>Базовые изделия</b><span>Цена за изделие<br/>без нанесения.</span></div>
-            <div className="base-price-grid">{basePrices.map((item,index)=><button type="button" className={`base-price-card ${priceProduct===index?"selected":""}`} aria-pressed={priceProduct===index} onClick={()=>setPriceProduct(index)} key={item.title}><div><h3>{item.title}</h3><p>{item.note}</p><strong>{item.price} BYN</strong><small>без печати</small></div><Image src={item.image} alt="" fill sizes="(max-width: 760px) 50vw, 25vw"/></button>)}</div>
+            <div className="base-price-grid">{basePrices.length > 0
+              ? basePrices.map((item,index)=><button type="button" className={`base-price-card ${item.slug} ${safePriceProduct===index?"selected":""}`} aria-pressed={safePriceProduct===index} onClick={()=>setPriceProduct(index)} key={item.slug}><div><h3>{item.title}</h3><p>{item.note}</p><strong>{item.price} BYN</strong><small>без печати</small></div><Image src={item.image} alt="" fill sizes="(max-width: 760px) calc(100vw - 32px), 25vw"/></button>)
+              : <div className="landing-catalog-empty"><b>Нет доступных изделий</b><span>Уточните актуальный ассортимент у менеджера.</span></div>}</div>
           </div>
           <div className="cost-row print-cost-row">
-            <div className="cost-side"><Icon name="calculator"/><b>Стоимость печати</b><span>Выберите размер зоны<br/>нанесения на изделии.</span></div>
-            <div className="format-price-grid">{printPrices.map((item,index)=><button type="button" className={`format-card ${priceFormat===index?"selected":""}`} aria-pressed={priceFormat===index} onClick={()=>setPriceFormat(index)} key={item.size}><b>{item.size}</b><small className="format-dimensions">{item.dimensions}</small><div className="format-shirt"><FormatShirtIcon scale={item.scale} size={item.size}/></div><span className="format-label">{item.label}</span><strong>от {item.price} BYN</strong></button>)}</div>
+            <div className="cost-side"><Icon name="calculator"/><b>Стоимость печати</b><span>{selectedPrintMethod ? `${selectedPrintMethod.name}. Выберите размер зоны нанесения.` : "Уточните доступный способ нанесения у менеджера."}</span></div>
+            <div className="format-price-grid">{printPrices.length > 0
+              ? printPrices.map((item,index)=><button type="button" className={`format-card ${safePriceFormat===index?"selected":""}`} aria-pressed={safePriceFormat===index} onClick={()=>setPriceFormat(index)} key={item.size}><b>{item.size}</b><small className="format-dimensions">{item.dimensions}</small><div className="format-shirt"><FormatShirtIcon scale={item.scale} size={item.size}/></div><span className="format-label">{item.label}</span><strong>от {item.price} BYN</strong></button>)
+              : <div className="landing-catalog-empty"><b>Расчёт печати временно недоступен</b><span>Менеджер рассчитает стоимость по вашему макету.</span></div>}</div>
           </div>
-          <div className="cost-summary-card">
+          {selectedBasePrice && selectedPrintPrice ? <div className="cost-summary-card">
             <div className="cost-summary-header">
               <Icon name="calculator"/>
               <div>
@@ -485,7 +514,13 @@ export default function Home() {
                 Оформить в конструкторе <Icon name="arrow" />
               </a>
             </div>
-          </div>
+          </div> : <div className="cost-summary-card catalog-unavailable-summary">
+            <div className="cost-summary-header">
+              <Icon name="calculator"/>
+              <div><b>Индивидуальный расчёт</b><span>В каталоге сейчас недостаточно данных для автоматического расчёта.</span></div>
+            </div>
+            <a href="#contacts" className="button">Связаться с менеджером</a>
+          </div>}
           <p className="cost-note">Размеры зон указаны в сантиметрах. Перед запуском в печать макет бесплатно проверяется и согласовывается. Скидки от объёма рассчитываются автоматически в конструкторе.</p>
         </div>
       </section>

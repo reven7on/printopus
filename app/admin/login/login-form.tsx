@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -35,7 +36,7 @@ export default function LoginForm() {
     <main className="admin-login-page">
       <section className="admin-login-card" aria-labelledby="admin-login-title">
         <Link className="admin-login-brand" href="/" aria-label="На главную страницу Принтопус">
-          <span>П</span>
+          <Image src="/logo.webp" alt="" width={48} height={48} priority />
           <strong>ПРИНТОПУС</strong>
         </Link>
         <div className="admin-login-heading">

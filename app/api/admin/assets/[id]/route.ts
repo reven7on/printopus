@@ -21,10 +21,11 @@ export async function GET(request: Request, context: RouteContext) {
     const asset = await database.designAsset.findUnique({ where: { id } });
     if (!asset) return adminError("NOT_FOUND", "Файл не найден.", 404);
     const bytes = await readStoredAsset(asset.storageKey);
+    const isPreview = new URL(request.url).searchParams.get("preview") === "1" && asset.mimeType.startsWith("image/");
     return new Response(new Uint8Array(bytes), {
       headers: {
         "Cache-Control": "private, no-store",
-        "Content-Disposition": downloadName(asset.originalName),
+        "Content-Disposition": isPreview ? "inline" : downloadName(asset.originalName),
         "Content-Length": String(bytes.byteLength),
         "Content-Type": asset.mimeType,
         "X-Content-Type-Options": "nosniff",

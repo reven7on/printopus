@@ -17,23 +17,38 @@ export type PublicCatalog = {
       colorHex: string | null;
       priceDelta: number;
     }>;
+    printMethods: Array<{
+      slug: string;
+      name: string;
+      description: string | null;
+      priceDelta: number;
+      formats: Array<{
+        code: string;
+        widthCm: number;
+        heightCm: number;
+        priceDelta: number;
+      }>;
+    }>;
   }>;
-  printMethods: Array<{ slug: string; name: string; description: string | null; priceDelta: number }>;
-  printFormats: Array<{ code: string; widthCm: number; heightCm: number; priceDelta: number }>;
   volumeDiscounts: Array<{ minQuantity: number; percent: number }>;
 };
 
+export type PublicCatalogStatus = "loading" | "ready" | "error";
+
 export function usePublicCatalog() {
-  const [catalog, setCatalog] = useState<PublicCatalog | null>(null);
+  const [state, setState] = useState<{
+    catalog: PublicCatalog | null;
+    status: PublicCatalogStatus;
+  }>({ catalog: null, status: "loading" });
 
   useEffect(() => {
     let active = true;
     fetch("/api/catalog", { headers: { accept: "application/json" } })
       .then((response) => response.ok ? response.json() as Promise<PublicCatalog> : Promise.reject())
-      .then((result) => { if (active) setCatalog(result); })
-      .catch(() => undefined);
+      .then((result) => { if (active) setState({ catalog: result, status: "ready" }); })
+      .catch(() => { if (active) setState({ catalog: null, status: "error" }); });
     return () => { active = false; };
   }, []);
 
-  return catalog;
+  return state;
 }

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Prisma, ProductOptionType } from "../../../../app/generated/prisma/client";
 import {
   adminError,
@@ -9,7 +10,7 @@ import { database } from "../../../../lib/db";
 
 export const runtime = "nodejs";
 
-type CatalogResource = "product" | "option" | "printMethod" | "printFormat" | "discount";
+type CatalogResource = "product" | "option" | "printMethod" | "printFormat" | "productPrintMethod" | "productPrintFormat" | "discount";
 
 function asRecord(value: unknown): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("INVALID_INPUT");
@@ -32,6 +33,11 @@ function identifier(value: unknown, max: number, uppercase = false) {
   const result = text(value, 1, max);
   if (!/^[a-z0-9-]+$/i.test(result)) throw new Error("INVALID_INPUT");
   return uppercase ? result.toUpperCase() : result.toLowerCase();
+}
+
+function optionIdentifier(label: string) {
+  const normalized = label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 64);
+  return normalized || `option-${randomUUID().slice(0, 8)}`;
 }
 
 function colorHex(value: unknown) {
@@ -63,7 +69,27 @@ function serializeCatalog(data: Awaited<ReturnType<typeof loadCatalog>>) {
     products: data.products.map((product) => ({
       ...product,
       basePrice: Number(product.basePrice),
-      options: product.options.map((option) => ({ ...option, priceDelta: Number(option.priceDelta) })),
+      options: product.options.map((option) => ({ ...option, priceDelta: 0 })),
+      printMethods: product.printMethods.map((productMethod) => ({
+        id: productMethod.id,
+        printMethodId: productMethod.printMethodId,
+        slug: productMethod.printMethod.slug,
+        name: productMethod.printMethod.name,
+        description: productMethod.printMethod.description,
+        priceDelta: Number(productMethod.priceDelta),
+        active: productMethod.active,
+        sortOrder: productMethod.sortOrder,
+        formats: productMethod.formats.map((productFormat) => ({
+          id: productFormat.id,
+          printFormatId: productFormat.printFormatId,
+          code: productFormat.printFormat.code,
+          widthCm: Number(productFormat.printFormat.widthCm),
+          heightCm: Number(productFormat.printFormat.heightCm),
+          priceDelta: Number(productFormat.priceDelta),
+          active: productFormat.active,
+          sortOrder: productFormat.sortOrder,
+        })),
+      })),
     })),
     printMethods: data.printMethods.map((item) => ({ ...item, priceDelta: Number(item.priceDelta) })),
     printFormats: data.printFormats.map((item) => ({
@@ -78,7 +104,19 @@ function serializeCatalog(data: Awaited<ReturnType<typeof loadCatalog>>) {
 
 async function loadCatalog() {
   const [products, printMethods, printFormats, discounts] = await Promise.all([
-    database.product.findMany({ orderBy: { sortOrder: "asc" }, include: { options: { orderBy: [{ type: "asc" }, { sortOrder: "asc" }] } } }),
+    database.product.findMany({
+      orderBy: { sortOrder: "asc" },
+      include: {
+        options: { orderBy: [{ type: "asc" }, { sortOrder: "asc" }] },
+        printMethods: {
+          orderBy: { sortOrder: "asc" },
+          include: {
+            printMethod: true,
+            formats: { orderBy: { sortOrder: "asc" }, include: { printFormat: true } },
+          },
+        },
+      },
+    }),
     database.printMethod.findMany({ orderBy: { sortOrder: "asc" } }),
     database.printFormat.findMany({ orderBy: { sortOrder: "asc" } }),
     database.volumeDiscount.findMany({ orderBy: { minQuantity: "asc" } }),
@@ -108,7 +146,6 @@ function getUpdate(resource: CatalogResource, raw: Record<string, unknown>) {
   if (resource === "option") return {
     ...(raw.label !== undefined ? { label: text(raw.label, 1, 100) } : {}),
     ...(raw.colorHex !== undefined ? { colorHex: colorHex(raw.colorHex) } : {}),
-    ...(raw.priceDelta !== undefined ? { priceDelta: number(raw.priceDelta, 0, 100_000) } : {}),
     ...(raw.active !== undefined ? { active: boolean(raw.active) } : {}),
     ...(raw.sortOrder !== undefined ? { sortOrder: integer(raw.sortOrder, 0, 10_000) } : {}),
   };
@@ -122,6 +159,11 @@ function getUpdate(resource: CatalogResource, raw: Record<string, unknown>) {
   if (resource === "printFormat") return {
     ...(raw.widthCm !== undefined ? { widthCm: number(raw.widthCm, 1, 500) } : {}),
     ...(raw.heightCm !== undefined ? { heightCm: number(raw.heightCm, 1, 500) } : {}),
+    ...(raw.priceDelta !== undefined ? { priceDelta: number(raw.priceDelta, 0, 100_000) } : {}),
+    ...(raw.active !== undefined ? { active: boolean(raw.active) } : {}),
+    ...(raw.sortOrder !== undefined ? { sortOrder: integer(raw.sortOrder, 0, 10_000) } : {}),
+  };
+  if (resource === "productPrintMethod" || resource === "productPrintFormat") return {
     ...(raw.priceDelta !== undefined ? { priceDelta: number(raw.priceDelta, 0, 100_000) } : {}),
     ...(raw.active !== undefined ? { active: boolean(raw.active) } : {}),
     ...(raw.sortOrder !== undefined ? { sortOrder: integer(raw.sortOrder, 0, 10_000) } : {}),
@@ -140,7 +182,7 @@ export async function PATCH(request: Request) {
   try {
     const body = asRecord(await readAdminJson(request));
     const resource = text(body.resource, 1, 32) as CatalogResource;
-    if (!["product", "option", "printMethod", "printFormat", "discount"].includes(resource)) throw new Error("INVALID_INPUT");
+    if (!["product", "option", "printMethod", "printFormat", "productPrintMethod", "productPrintFormat", "discount"].includes(resource)) throw new Error("INVALID_INPUT");
     const id = text(body.id, 1, 100);
     const changes = getUpdate(resource, asRecord(body.changes));
     if (!Object.keys(changes).length) throw new Error("INVALID_INPUT");
@@ -154,6 +196,10 @@ export async function PATCH(request: Request) {
             ? await transaction.printMethod.update({ where: { id }, data: changes })
             : resource === "printFormat"
               ? await transaction.printFormat.update({ where: { id }, data: changes })
+              : resource === "productPrintMethod"
+                ? await transaction.productPrintMethod.update({ where: { id }, data: changes })
+                : resource === "productPrintFormat"
+                  ? await transaction.productPrintFormat.update({ where: { id }, data: changes })
               : await transaction.volumeDiscount.update({ where: { id }, data: changes });
       await writeAuditLog({ actor: auth.identity.username, action: "updated", entity: resource, entityId: id, details: changes }, transaction);
       return updated;
@@ -183,21 +229,31 @@ export async function POST(request: Request) {
     const body = asRecord(await readAdminJson(request));
     const resource = text(body.resource, 1, 32) as CatalogResource;
     const data = asRecord(body.data);
-    if (!["option", "printMethod", "printFormat", "discount"].includes(resource)) throw new Error("INVALID_INPUT");
+    if (!["option", "printMethod", "printFormat", "productPrintMethod", "productPrintFormat", "discount"].includes(resource)) throw new Error("INVALID_INPUT");
 
     const created = await database.$transaction(async (transaction) => {
       const requestedOptionType = resource === "option" ? text(data.type, 1, 20) : null;
       if (requestedOptionType && !Object.values(ProductOptionType).includes(requestedOptionType as ProductOptionType)) {
         throw new Error("INVALID_INPUT");
       }
+      const requestedOptionLabel = resource === "option" ? text(data.label, 1, 100) : null;
+      const requestedColorHex = resource === "option" ? colorHex(data.colorHex ?? null) : null;
+      if (requestedOptionType === ProductOptionType.COLOR && !requestedColorHex) throw new Error("INVALID_INPUT");
+      const requestedOptionValue = resource === "option"
+        ? data.value !== undefined
+          ? identifier(data.value, 64)
+          : requestedOptionType === ProductOptionType.COLOR
+            ? `color-${requestedColorHex?.slice(1)}`
+            : optionIdentifier(requestedOptionLabel ?? "")
+        : null;
       const item = resource === "option"
         ? await transaction.productOption.create({ data: {
           productId: text(data.productId, 1, 100),
           type: requestedOptionType as ProductOptionType,
-          value: identifier(data.value, 64),
-          label: text(data.label, 1, 100),
-          colorHex: colorHex(data.colorHex ?? null),
-          priceDelta: number(data.priceDelta ?? 0, 0, 100_000),
+          value: requestedOptionValue as string,
+          label: requestedOptionLabel as string,
+          colorHex: requestedColorHex,
+          priceDelta: 0,
         } })
         : resource === "printMethod"
           ? await transaction.printMethod.create({ data: {
@@ -213,6 +269,18 @@ export async function POST(request: Request) {
               heightCm: number(data.heightCm, 1, 500),
               priceDelta: number(data.priceDelta, 0, 100_000),
             } })
+            : resource === "productPrintMethod"
+              ? await transaction.productPrintMethod.create({ data: {
+                productId: text(data.productId, 1, 100),
+                printMethodId: text(data.printMethodId, 1, 100),
+                priceDelta: number(data.priceDelta, 0, 100_000),
+              } })
+              : resource === "productPrintFormat"
+                ? await transaction.productPrintFormat.create({ data: {
+                  productPrintMethodId: text(data.productPrintMethodId, 1, 100),
+                  printFormatId: text(data.printFormatId, 1, 100),
+                  priceDelta: number(data.priceDelta, 0, 100_000),
+                } })
             : await transaction.volumeDiscount.create({ data: {
               minQuantity: integer(data.minQuantity, 1, 1_000_000),
               percent: number(data.percent, 0, 100),
@@ -230,5 +298,41 @@ export async function POST(request: Request) {
     }
     console.error("Failed to create admin catalog item", error);
     return adminError("INTERNAL_ERROR", "Не удалось создать запись.", 500);
+  }
+}
+
+export async function DELETE(request: Request) {
+  const auth = await authorizeAdminRequest(request, true);
+  if ("response" in auth) return auth.response;
+
+  try {
+    const body = asRecord(await readAdminJson(request));
+    const resource = text(body.resource, 1, 32) as Exclude<CatalogResource, "product">;
+    if (!["option", "printMethod", "printFormat", "productPrintMethod", "productPrintFormat", "discount"].includes(resource)) throw new Error("INVALID_INPUT");
+    const id = text(body.id, 1, 100);
+
+    await database.$transaction(async (transaction) => {
+      if (resource === "option") await transaction.productOption.delete({ where: { id } });
+      else if (resource === "printMethod") await transaction.printMethod.delete({ where: { id } });
+      else if (resource === "printFormat") await transaction.printFormat.delete({ where: { id } });
+      else if (resource === "productPrintMethod") await transaction.productPrintMethod.delete({ where: { id } });
+      else if (resource === "productPrintFormat") await transaction.productPrintFormat.delete({ where: { id } });
+      else await transaction.volumeDiscount.delete({ where: { id } });
+      await writeAuditLog({ actor: auth.identity.username, action: "deleted", entity: resource, entityId: id }, transaction);
+    });
+
+    return Response.json({ deleted: true });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
+      return adminError("NOT_FOUND", "Запись уже удалена.", 404);
+    }
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2003") {
+      return adminError("IN_USE", "Эта запись используется в заказах. Спрячьте её переключателем доступности.", 409);
+    }
+    if (error instanceof Error && ["INVALID_INPUT", "INVALID_JSON", "REQUEST_TOO_LARGE"].includes(error.message)) {
+      return adminError("INVALID_INPUT", "Не удалось определить запись для удаления.", 400);
+    }
+    console.error("Failed to delete admin catalog item", error);
+    return adminError("INTERNAL_ERROR", "Не удалось удалить запись.", 500);
   }
 }

@@ -114,7 +114,7 @@ export async function POST(request: Request) {
     }
 
     const order = await database.$transaction(async (transaction) => {
-      const [product, printMethod, printFormat, discount] = await Promise.all([
+      const [product, printConfiguration, discount] = await Promise.all([
         transaction.product.findFirst({
           where: { slug: input.productSlug, active: true },
           include: {
@@ -129,11 +129,20 @@ export async function POST(request: Request) {
             },
           },
         }),
-        transaction.printMethod.findFirst({
-          where: { slug: input.printMethodSlug, active: true },
-        }),
-        transaction.printFormat.findFirst({
-          where: { code: input.printFormatCode, active: true },
+        transaction.productPrintFormat.findFirst({
+          where: {
+            active: true,
+            printFormat: { code: input.printFormatCode, active: true },
+            productPrintMethod: {
+              active: true,
+              product: { slug: input.productSlug, active: true },
+              printMethod: { slug: input.printMethodSlug, active: true },
+            },
+          },
+          include: {
+            printFormat: true,
+            productPrintMethod: { include: { printMethod: true } },
+          },
         }),
         transaction.volumeDiscount.findFirst({
           where: { active: true, minQuantity: { lte: input.quantity } },
@@ -142,8 +151,11 @@ export async function POST(request: Request) {
       ]);
 
       if (!product) throw new OrderInputError("Выбранное изделие недоступно.", "productSlug");
-      if (!printMethod) throw new OrderInputError("Способ печати недоступен.", "printMethodSlug");
-      if (!printFormat) throw new OrderInputError("Формат печати недоступен.", "printFormatCode");
+      if (!printConfiguration) {
+        throw new OrderInputError("Этот способ и формат печати недоступны для выбранного изделия.", "printFormatCode");
+      }
+      const printMethod = printConfiguration.productPrintMethod.printMethod;
+      const printFormat = printConfiguration.printFormat;
       if (!placementsByProduct[product.slug]?.includes(input.placement)) {
         throw new OrderInputError("Зона нанесения недоступна для этого изделия.", "placement");
       }
@@ -155,9 +167,9 @@ export async function POST(request: Request) {
 
       const quote = calculateOrderQuote({
         productPrice: Number(product.basePrice),
-        colorPrice: Number(color.priceDelta),
-        printMethodPrice: Number(printMethod.priceDelta),
-        printFormatPrice: Number(printFormat.priceDelta),
+        colorPrice: 0,
+        printMethodPrice: Number(printConfiguration.productPrintMethod.priceDelta),
+        printFormatPrice: Number(printConfiguration.priceDelta),
         quantity: input.quantity,
         discountPercent: Number(discount?.percent ?? 0),
       });

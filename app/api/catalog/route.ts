@@ -4,7 +4,7 @@ export const runtime = "nodejs";
 
 export async function GET() {
   try {
-    const [products, printMethods, printFormats, volumeDiscounts] = await Promise.all([
+    const [products, volumeDiscounts] = await Promise.all([
       database.product.findMany({
         where: { active: true },
         orderBy: { sortOrder: "asc" },
@@ -25,17 +25,31 @@ export async function GET() {
               priceDelta: true,
             },
           },
+          printMethods: {
+            where: {
+              active: true,
+              printMethod: { active: true },
+              formats: { some: { active: true, printFormat: { active: true } } },
+            },
+            orderBy: { sortOrder: "asc" },
+            select: {
+              priceDelta: true,
+              printMethod: {
+                select: { slug: true, name: true, description: true },
+              },
+              formats: {
+                where: { active: true, printFormat: { active: true } },
+                orderBy: { sortOrder: "asc" },
+                select: {
+                  priceDelta: true,
+                  printFormat: {
+                    select: { code: true, widthCm: true, heightCm: true },
+                  },
+                },
+              },
+            },
+          },
         },
-      }),
-      database.printMethod.findMany({
-        where: { active: true },
-        orderBy: { sortOrder: "asc" },
-        select: { slug: true, name: true, description: true, priceDelta: true },
-      }),
-      database.printFormat.findMany({
-        where: { active: true },
-        orderBy: { sortOrder: "asc" },
-        select: { code: true, widthCm: true, heightCm: true, priceDelta: true },
       }),
       database.volumeDiscount.findMany({
         where: { active: true },
@@ -52,18 +66,18 @@ export async function GET() {
           basePrice: Number(product.basePrice),
           options: product.options.map((option) => ({
             ...option,
-            priceDelta: Number(option.priceDelta),
+            priceDelta: 0,
           })),
-        })),
-        printMethods: printMethods.map((method) => ({
-          ...method,
-          priceDelta: Number(method.priceDelta),
-        })),
-        printFormats: printFormats.map((format) => ({
-          ...format,
-          widthCm: Number(format.widthCm),
-          heightCm: Number(format.heightCm),
-          priceDelta: Number(format.priceDelta),
+          printMethods: product.printMethods.map((productMethod) => ({
+            ...productMethod.printMethod,
+            priceDelta: Number(productMethod.priceDelta),
+            formats: productMethod.formats.map((productFormat) => ({
+              ...productFormat.printFormat,
+              widthCm: Number(productFormat.printFormat.widthCm),
+              heightCm: Number(productFormat.printFormat.heightCm),
+              priceDelta: Number(productFormat.priceDelta),
+            })),
+          })),
         })),
         volumeDiscounts: volumeDiscounts.map((discount) => ({
           ...discount,

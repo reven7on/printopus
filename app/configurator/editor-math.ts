@@ -80,7 +80,7 @@ export function getAutomaticPrintEstimate<TFormat extends PrintFormat>(
   });
 
   if (elementCount === 0) {
-    return { size: formats[3], width: 0, height: 0, isFallback: true };
+    return { size: formats[Math.min(3, formats.length - 1)], width: 0, height: 0, isFallback: true };
   }
 
   const shortSide = Math.min(estimatedWidth, estimatedHeight);

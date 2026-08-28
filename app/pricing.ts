@@ -11,16 +11,16 @@ export const DEFAULT_PRINT_METHOD_PRICE = 4;
 export const GARMENT_COLOR_PRICES = {
   white: 0,
   natural: 0,
-  black: 2,
-  khaki: 2,
-  grey: 2,
-  darkgrey: 2,
-  navy: 2,
-  blue: 2,
-  red: 2,
-  burgundy: 2,
-  green: 2,
-  sand: 2,
+  black: 0,
+  khaki: 0,
+  grey: 0,
+  darkgrey: 0,
+  navy: 0,
+  blue: 0,
+  red: 0,
+  burgundy: 0,
+  green: 0,
+  sand: 0,
 } as const;
 
 export const PRINT_FORMATS = [

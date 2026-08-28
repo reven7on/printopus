@@ -9,7 +9,7 @@ import {
   parseCreateOrderInput,
 } from "../lib/order-domain.ts";
 import { createAdminSessionToken, readAdminSessionToken } from "../lib/admin-session.ts";
-import { getQuantityDiscount, PRINT_FORMATS, PRODUCT_BASE_PRICES } from "../app/pricing.ts";
+import { GARMENT_COLOR_PRICES, getQuantityDiscount, PRINT_FORMATS, PRODUCT_BASE_PRICES } from "../app/pricing.ts";
 
 test("volume discount boundaries match the public offer", () => {
   const cases = [
@@ -37,6 +37,10 @@ test("the landing and configurator share the same A4 shirt price inputs", () => 
   assert.equal(PRODUCT_BASE_PRICES.shirt + 4 + a4.add, 26);
 });
 
+test("color and size choices never add a surcharge", () => {
+  assert.deepEqual(new Set(Object.values(GARMENT_COLOR_PRICES)), new Set([0]));
+});
+
 test("Belarusian phone validation accepts supported formats and rejects incomplete numbers", () => {
   assert.equal(normalizePhone("+375 (29) 555-20-30"), "375295552030");
   assert.equal(isValidBelarusianPhone("+375 (29) 555-20-30"), true);
@@ -51,6 +55,10 @@ test("editor estimates print format from the actual artwork dimensions", () => {
   assert.equal(empty.isFallback, true);
   assert.equal(empty.size.id, "A4");
 
+  const compactFallback = getAutomaticPrintEstimate({ front: [] }, "cap", zones, PRINT_FORMATS.slice(0, 2));
+  assert.equal(compactFallback.isFallback, true);
+  assert.equal(compactFallback.size.id, "A6");
+
   const smallLogo = getAutomaticPrintEstimate({
     front: [{ type: "image", content: "logo", x: 50, y: 50, scale: 1, rotation: 0, width: 20, aspectRatio: 1 }],
   }, "shirt", zones, PRINT_FORMATS);
@@ -61,6 +69,51 @@ test("editor estimates print format from the actual artwork dimensions", () => {
     front: [{ type: "shape", content: "square", x: 50, y: 50, scale: 1, rotation: 0, width: 90 }],
   }, "shirt", zones, PRINT_FORMATS);
   assert.equal(largeArtwork.size.id, "A3");
+});
+
+test("configurator distinguishes a ready empty catalog from loading fallback data", async () => {
+  const configurator = await readFile(new URL("../app/configurator/page.tsx", import.meta.url), "utf8");
+  const catalogHook = await readFile(new URL("../app/use-public-catalog.ts", import.meta.url), "utf8");
+
+  assert.match(catalogHook, /status:\s*"ready"/);
+  assert.match(catalogHook, /status:\s*"error"/);
+  assert.match(configurator, /selectedCatalogItem\?\.printMethods/);
+  assert.match(configurator, /const availablePrintSizes = selectedMethod\?\.formats/);
+  assert.match(configurator, /const discount = catalogReady/);
+  assert.doesNotMatch(configurator, /printFormats\.length\s*>=\s*4/);
+});
+
+test("landing does not restore inactive catalog items or a fallback DTF price", async () => {
+  const landing = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+
+  assert.match(landing, /useState<number \| null>\(null\)/);
+  assert.match(landing, /const catalogReady = publicCatalogStatus === "ready"/);
+  assert.match(landing, /const visibleProducts = catalogReady/);
+  assert.match(landing, /fallbackBasePrices\.flatMap/);
+  assert.match(landing, /selectedCatalogPriceProduct\?\.printMethods\.find\(\(method\) => method\.slug === "dtf"\)/);
+  assert.match(landing, /: catalogReady \? \[\] : fallbackPrintPrices/);
+  assert.doesNotMatch(landing, /priceDelta \?\? DEFAULT_PRINT_METHOD_PRICE/);
+});
+
+test("admin catalog uses immediate switches and one contextual save action", async () => {
+  const admin = await readFile(new URL("../app/admin/(protected)/admin-app.tsx", import.meta.url), "utf8");
+
+  assert.match(admin, /function ProductOptionsEditor/);
+  assert.match(admin, /function ProductPrintEditor/);
+  assert.match(admin, /productPrintMethod/);
+  assert.match(admin, /productPrintFormat/);
+  assert.match(admin, /renderGroup\("COLOR", "Цвета"/);
+  assert.match(admin, /renderGroup\("SIZE", "Размеры"/);
+  assert.match(admin, /Переключатели применяются сразу/);
+  assert.match(admin, /admin-context-savebar/);
+  assert.match(admin, /saveCatalogChanges/);
+  assert.match(admin, /saveCatalogStatus/);
+  assert.match(admin, /function CatalogDeleteButton/);
+  assert.match(admin, /method: "DELETE"/);
+  assert.doesNotMatch(admin, /Сохранить поля/);
+  assert.doesNotMatch(admin, /Название для клиента/);
+  assert.doesNotMatch(admin, /saveCatalogItem/);
+  assert.doesNotMatch(admin, /className="admin-options-grid"/);
 });
 
 test("responsive contracts cover landing navigation and configurator controls", async () => {

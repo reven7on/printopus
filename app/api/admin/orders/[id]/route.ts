@@ -1,4 +1,4 @@
-import { OrderStatus } from "../../../../../app/generated/prisma/client";
+import { OrderStatus, ProductOptionType } from "../../../../../app/generated/prisma/client";
 import {
   adminError,
   authorizeAdminRequest,
@@ -10,6 +10,7 @@ import { database } from "../../../../../lib/db";
 export const runtime = "nodejs";
 
 type RouteContext = { params: Promise<{ id: string }> };
+const workflow: OrderStatus[] = ["NEW", "CONFIRMED", "IN_PRODUCTION", "READY", "COMPLETED"];
 
 function serializeOrder<T extends {
   subtotal: unknown;
@@ -44,6 +45,15 @@ export async function GET(request: Request, context: RouteContext) {
           include: {
             printMethod: { select: { name: true } },
             printFormat: { select: { code: true, widthCm: true, heightCm: true } },
+            product: {
+              select: {
+                slug: true,
+                options: {
+                  where: { type: ProductOptionType.COLOR },
+                  select: { value: true, label: true, colorHex: true },
+                },
+              },
+            },
             assets: {
               select: {
                 id: true,
@@ -61,7 +71,16 @@ export async function GET(request: Request, context: RouteContext) {
       },
     });
     if (!order) return adminError("NOT_FOUND", "Заказ не найден.", 404);
-    return Response.json({ order: serializeOrder(order) }, { headers: { "Cache-Control": "no-store" } });
+    const serialized = serializeOrder(order);
+    return Response.json({
+      order: {
+        ...serialized,
+        items: serialized.items.map((item) => {
+          const color = item.product?.options.find((option) => option.label === item.colorLabel);
+          return { ...item, colorValue: color?.value ?? null, colorHex: color?.colorHex ?? null };
+        }),
+      },
+    }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("Failed to load admin order", error);
     return adminError("INTERNAL_ERROR", "Не удалось загрузить заказ.", 500);
@@ -87,6 +106,12 @@ export async function PATCH(request: Request, context: RouteContext) {
       if (!current) return null;
       const nextStatus = status as OrderStatus;
       if (current.status === nextStatus) return current;
+      const currentIndex = workflow.indexOf(current.status);
+      const nextIndex = workflow.indexOf(nextStatus);
+      const requiresReason = nextStatus === OrderStatus.CANCELLED || current.status === OrderStatus.CANCELLED || (currentIndex >= 0 && nextIndex >= 0 && nextIndex < currentIndex);
+      if (requiresReason && !note) {
+        throw new Error("STATUS_REASON_REQUIRED");
+      }
 
       const updated = await transaction.order.update({ where: { id }, data: { status: nextStatus } });
       await transaction.orderStatusHistory.create({
@@ -111,6 +136,9 @@ export async function PATCH(request: Request, context: RouteContext) {
     if (!order) return adminError("NOT_FOUND", "Заказ не найден.", 404);
     return Response.json({ order: { ...order, subtotal: Number(order.subtotal), discountPercent: Number(order.discountPercent), total: Number(order.total) } });
   } catch (error) {
+    if (error instanceof Error && error.message === "STATUS_REASON_REQUIRED") {
+      return adminError("STATUS_REASON_REQUIRED", "Укажите причину отмены или возврата на предыдущий этап.", 400);
+    }
     if (error instanceof Error && ["INVALID_JSON", "REQUEST_TOO_LARGE"].includes(error.message)) {
       return adminError("INVALID_INPUT", "Неверные данные.", 400);
     }

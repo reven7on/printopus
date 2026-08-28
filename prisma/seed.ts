@@ -1,14 +1,20 @@
 import "dotenv/config";
 import { PrismaPg } from "@prisma/adapter-pg";
-import { PrismaClient, ProductKind, ProductOptionType } from "../app/generated/prisma/client";
+import { pathToFileURL } from "node:url";
+import { Prisma, PrismaClient, ProductKind, ProductOptionType } from "../app/generated/prisma/client";
 import { GARMENT_COLOR_PRICES, PRINT_FORMATS, PRODUCT_BASE_PRICES } from "../app/pricing";
 
-const connectionString = process.env.DATABASE_URL;
-if (!connectionString) throw new Error("DATABASE_URL is required for seeding.");
+type SeedDatabase = Pick<
+  Prisma.TransactionClient,
+  "product" | "productOption" | "printMethod" | "printFormat" | "productPrintMethod" | "productPrintFormat" | "volumeDiscount"
+>;
 
-const database = new PrismaClient({
-  adapter: new PrismaPg({ connectionString }),
-});
+export function createSeedDatabaseClient() {
+  const connectionString = process.env.DATABASE_URL;
+  if (!connectionString) throw new Error("DATABASE_URL is required for seeding.");
+  const schema = new URL(connectionString).searchParams.get("schema")?.trim() || undefined;
+  return new PrismaClient({ adapter: new PrismaPg({ connectionString }, { schema }) });
+}
 
 const products = [
   { slug: "shirt", name: "Футболка", kind: ProductKind.SHIRT, description: "100% хлопковый трикотаж", basePrice: PRODUCT_BASE_PRICES.shirt, sizes: ["XS", "S", "M", "L", "XL", "2XL", "3XL"], colors: ["white", "black", "khaki", "grey", "navy", "red", "burgundy"] },
@@ -33,7 +39,7 @@ const colorDetails: Record<string, { label: string; colorHex: string; priceDelta
   sand: { label: "Песочный", colorHex: "#ebe4dc", priceDelta: GARMENT_COLOR_PRICES.sand },
 };
 
-async function seed() {
+export async function seedCatalog(database: SeedDatabase) {
   for (const [sortOrder, item] of products.entries()) {
     const product = await database.product.upsert({
       where: { slug: item.slug },
@@ -91,6 +97,52 @@ async function seed() {
     });
   }
 
+  const [seedProducts, seedMethods, seedFormats] = await Promise.all([
+    database.product.findMany({ select: { id: true, slug: true } }),
+    database.printMethod.findMany({ select: { id: true, slug: true, priceDelta: true, sortOrder: true } }),
+    database.printFormat.findMany({ select: { id: true, code: true, priceDelta: true, sortOrder: true } }),
+  ]);
+
+  for (const product of seedProducts) {
+    for (const method of seedMethods) {
+      if (product.slug === "cap" && !["dtf", "embroidery"].includes(method.slug)) continue;
+      const productMethod = await database.productPrintMethod.upsert({
+        where: { productId_printMethodId: { productId: product.id, printMethodId: method.id } },
+        update: { priceDelta: method.priceDelta, sortOrder: method.sortOrder, active: true },
+        create: {
+          productId: product.id,
+          printMethodId: method.id,
+          priceDelta: method.priceDelta,
+          sortOrder: method.sortOrder,
+        },
+      });
+
+      for (const format of seedFormats) {
+        const allowed = product.slug === "cap"
+          ? ["A7", "A6"].includes(format.code)
+          : method.slug === "embroidery"
+            ? ["A7", "A6", "A5"].includes(format.code)
+            : true;
+        if (!allowed) continue;
+        await database.productPrintFormat.upsert({
+          where: {
+            productPrintMethodId_printFormatId: {
+              productPrintMethodId: productMethod.id,
+              printFormatId: format.id,
+            },
+          },
+          update: { priceDelta: format.priceDelta, sortOrder: format.sortOrder, active: true },
+          create: {
+            productPrintMethodId: productMethod.id,
+            printFormatId: format.id,
+            priceDelta: format.priceDelta,
+            sortOrder: format.sortOrder,
+          },
+        });
+      }
+    }
+  }
+
   for (const discount of [
     { minQuantity: 20, percent: 5 },
     { minQuantity: 50, percent: 11 },
@@ -105,10 +157,19 @@ async function seed() {
   }
 }
 
-seed()
-  .then(() => database.$disconnect())
-  .catch(async (error) => {
-    console.error(error);
+async function runSeed() {
+  const database = createSeedDatabaseClient();
+  try {
+    await seedCatalog(database);
+  } finally {
     await database.$disconnect();
+  }
+}
+
+const entryPoint = process.argv[1] ? pathToFileURL(process.argv[1]).href : null;
+if (entryPoint === import.meta.url) {
+  runSeed().catch((error) => {
+    console.error(error);
     process.exitCode = 1;
   });
+}

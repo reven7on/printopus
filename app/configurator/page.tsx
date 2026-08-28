@@ -631,7 +631,8 @@ function getFallbackColorsForItem(itemKey: ItemId) {
 }
 
 export default function Configurator() {
-  const publicCatalog = usePublicCatalog();
+  const { catalog: publicCatalog, status: publicCatalogStatus } = usePublicCatalog();
+  const catalogReady = publicCatalogStatus === "ready";
   const [currentStep, setCurrentStep] = useState(1);
   const [item, setItem] = useState<ItemId>("shirt");
   const [color, setColor] = useState("khaki");
@@ -672,9 +673,9 @@ export default function Configurator() {
   const pendingUploadsRef = useRef(new Map<string, File>());
 
   function resolveColors(itemKey: ItemId) {
+    if (!catalogReady) return getFallbackColorsForItem(itemKey);
     const product = publicCatalog?.products.find((entry) => entry.slug === itemKey);
     const options = product?.options.filter((option) => option.type === "COLOR") ?? [];
-    if (!options.length) return getFallbackColorsForItem(itemKey);
     return options.map((option) => {
       const fallback = garmentColors.find((entry) => entry.id === option.value);
       const hex = option.colorHex ?? fallback?.hex ?? "#d4d4d4";
@@ -683,17 +684,23 @@ export default function Configurator() {
   }
 
   function resolveSizes(itemKey: ItemId) {
+    if (!catalogReady) return garmentSizesByItem[itemKey];
     const product = publicCatalog?.products.find((entry) => entry.slug === itemKey);
     const options = product?.options.filter((option) => option.type === "SIZE") ?? [];
-    return options.length ? options.map((option) => ({ id: option.value, label: option.label })) : garmentSizesByItem[itemKey];
+    return options.map((option) => ({ id: option.value, label: option.label }));
   }
 
-  const availableItems = useMemo(() => items.filter((itemTemplate) => (
-    !publicCatalog || publicCatalog.products.some((entry) => entry.slug === itemTemplate.id)
-  )).map((itemTemplate) => {
+  const availableItems = useMemo(() => items.filter((itemTemplate) => {
+    if (!catalogReady) return true;
+    const product = publicCatalog?.products.find((entry) => entry.slug === itemTemplate.id);
+    if (!product) return false;
+    return product.options.some((option) => option.type === "COLOR")
+      && product.options.some((option) => option.type === "SIZE")
+      && product.printMethods.some((method) => method.formats.length > 0);
+  }).map((itemTemplate) => {
     const product = publicCatalog?.products.find((entry) => entry.slug === itemTemplate.id);
     return product ? { ...itemTemplate, label: product.name, note: product.description ?? itemTemplate.note, base: product.basePrice } : itemTemplate;
-  }), [publicCatalog]);
+  }), [catalogReady, publicCatalog]);
   useEffect(() => {
     if (availableItems.length && !availableItems.some((entry) => entry.id === item)) {
       // The catalog may deactivate the currently selected product between visits.
@@ -702,12 +709,16 @@ export default function Configurator() {
     }
   }, [availableItems, item]);
   const selectedItem = availableItems.find((i) => i.id === item) ?? availableItems[0];
-  const availableColors = resolveColors(item);
+  const selectedItemId = selectedItem?.id ?? item;
+  const selectedCatalogItem = catalogReady
+    ? publicCatalog?.products.find((entry) => entry.slug === selectedItemId)
+    : null;
+  const availableColors = resolveColors(selectedItemId);
   const selectedColor = availableColors.find((c) => c.id === color) ?? availableColors[0];
-  const availableGarmentSizes = resolveSizes(item);
+  const availableGarmentSizes = resolveSizes(selectedItemId);
   const selectedGarmentSize = availableGarmentSizes.find((size) => size.id === garmentSize) ?? availableGarmentSizes[0];
-  const availableMethods = publicCatalog?.printMethods.length
-    ? publicCatalog.printMethods.map((entry) => {
+  const availableMethods = catalogReady
+    ? (selectedCatalogItem?.printMethods ?? []).map((entry) => {
       const fallback = methods[entry.slug as keyof typeof methods];
       return {
         id: entry.slug,
@@ -716,24 +727,47 @@ export default function Configurator() {
         add: entry.priceDelta,
         icon: fallback?.icon ?? "layers",
         tags: fallback?.tags ?? [],
+        formats: entry.formats.map((format, index) => {
+          const formatFallback = PRINT_FORMATS.find((candidate) => candidate.id === format.code) ?? PRINT_FORMATS[Math.min(index, PRINT_FORMATS.length - 1)];
+          return {
+            ...formatFallback,
+            id: format.code,
+            label: format.code,
+            dimensions: `${format.widthCm.toString().replace(".", ",")} × ${format.heightCm.toString().replace(".", ",")} см`,
+            width: format.widthCm,
+            height: format.heightCm,
+            add: format.priceDelta,
+          };
+        }),
       };
     })
-    : Object.entries(methods).map(([id, entry]) => ({ id, ...entry }));
+    : Object.entries(methods).map(([id, entry]) => ({ id, ...entry, formats: [...PRINT_FORMATS] }));
   const selectedMethod = availableMethods.find((entry) => entry.id === method) ?? availableMethods[0];
-  const availablePrintSizes = useMemo(() => publicCatalog && publicCatalog.printFormats.length >= 4
-    ? publicCatalog.printFormats.map((format, index) => {
-      const fallback = PRINT_FORMATS.find((entry) => entry.id === format.code) ?? PRINT_FORMATS[Math.min(index, PRINT_FORMATS.length - 1)];
-      return {
-        ...fallback,
-        id: format.code,
-        label: format.code,
-        dimensions: `${format.widthCm.toString().replace(".", ",")} × ${format.heightCm.toString().replace(".", ",")} см`,
-        width: format.widthCm,
-        height: format.heightCm,
-        add: format.priceDelta,
-      };
-    })
-    : [...PRINT_FORMATS], [publicCatalog]);
+  const availablePrintSizes = selectedMethod?.formats ?? [];
+
+  if (catalogReady && (
+    !selectedItem
+    || !selectedColor
+    || !selectedGarmentSize
+    || !selectedMethod
+    || availablePrintSizes.length === 0
+  )) {
+    return (
+      <main className="config-catalog-state">
+        <section className="config-catalog-state-card" role="status">
+          <NextImage src="/logo.webp" alt="" width={96} height={96} />
+          <span>Каталог временно недоступен</span>
+          <h1>Оформление заказа приостановлено</h1>
+          <p>Сейчас нет полного набора доступных товаров, вариантов или способов печати. Пожалуйста, свяжитесь с менеджером либо попробуйте позже.</p>
+          <div>
+            <a className="button button-primary" href="https://t.me/printservice_by" target="_blank" rel="noopener noreferrer">Написать менеджеру</a>
+            <Link className="button outline" href="/">На главную</Link>
+          </div>
+        </section>
+      </main>
+    );
+  }
+
   const printEstimate = getAutomaticPrintEstimate(designs, item, printZoneDimensionsCm, availablePrintSizes);
   const selectedSize = printEstimate.size;
   const selectedPlacement = placements.find((p) => p.id === placement)!;
@@ -757,16 +791,17 @@ export default function Configurator() {
     ? currentPrintZone.width / currentPrintZone.canvas < 0.2 || currentPrintZone.height / currentPrintZone.canvas < 0.2
     : false;
   const designElementsCount = Object.values(designs).reduce((total, elements) => total + elements.length, 0);
-  const discount = publicCatalog?.volumeDiscounts.length
+  const discount = catalogReady
     ? (() => {
-      const current = [...publicCatalog.volumeDiscounts].reverse().find((entry) => qty >= entry.minQuantity);
-      const next = publicCatalog.volumeDiscounts.find((entry) => qty < entry.minQuantity);
+      const discounts = publicCatalog?.volumeDiscounts ?? [];
+      const current = [...discounts].reverse().find((entry) => qty >= entry.minQuantity);
+      const next = discounts.find((entry) => qty < entry.minQuantity);
       const percent = current?.percent ?? 0;
       return { percent, multiplier: 1 - percent / 100, nextAt: next?.minQuantity ?? null };
     })()
     : getQuantityDiscount(qty);
-  const discountMilestones = publicCatalog?.volumeDiscounts.length
-    ? [1, ...publicCatalog.volumeDiscounts.map((entry) => entry.minQuantity)]
+  const discountMilestones = catalogReady
+    ? [1, ...(publicCatalog?.volumeDiscounts ?? []).map((entry) => entry.minQuantity)]
     : [1, 20, 50, 100, 200];
   const hasRasterArtwork = Object.values(designs).some((elements) => (
     elements.some((element) => element.type === "image" && element.quality !== "vector")

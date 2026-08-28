@@ -14,12 +14,21 @@ export async function GET(request: Request) {
   const search = (url.searchParams.get("search") ?? "").trim().slice(0, 100);
   const phoneSearch = search.replace(/\D/g, "");
   const requestedStatus = url.searchParams.get("status");
+  const requestedSort = url.searchParams.get("sort");
   const status = requestedStatus && Object.values(OrderStatus).includes(requestedStatus as OrderStatus)
     ? requestedStatus as OrderStatus
     : null;
+  const isWorkFilter = requestedStatus === "WORK";
+  const orderBy = requestedSort === "total-asc"
+    ? { total: "asc" as const }
+    : requestedSort === "total-desc"
+      ? { total: "desc" as const }
+      : requestedSort === "date-asc"
+        ? { createdAt: "asc" as const }
+        : { createdAt: "desc" as const };
 
   const where: Prisma.OrderWhereInput = {
-    ...(status ? { status } : {}),
+    ...(status ? { status } : isWorkFilter ? { status: { in: [OrderStatus.CONFIRMED, OrderStatus.IN_PRODUCTION] } } : {}),
     ...(search ? {
       OR: [
         { orderNumber: { contains: search, mode: "insensitive" } },
@@ -33,7 +42,7 @@ export async function GET(request: Request) {
     const [orders, total] = await Promise.all([
       database.order.findMany({
         where,
-        orderBy: { createdAt: "desc" },
+        orderBy,
         skip: (page - 1) * pageSize,
         take: pageSize,
         select: {

@@ -14,7 +14,8 @@ RUN npm run build
 
 FROM dependencies AS migrations
 WORKDIR /app
-CMD ["npm", "run", "db:deploy"]
+COPY app/pricing.ts ./app/pricing.ts
+CMD ["npm", "run", "db:bootstrap"]
 
 FROM node:22-alpine AS runner
 WORKDIR /app

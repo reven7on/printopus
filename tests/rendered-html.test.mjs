@@ -51,7 +51,6 @@ test("renders the Printopus pages with the production Next.js server", { timeout
   server.stderr.on("data", (chunk) => { output += chunk; });
   const processExited = new Promise((resolve) => server.once("exit", () => resolve("exited")));
   let createdOrderId = null;
-  let catalogProductId = null;
   let createdDiscountId = null;
 
   try {
@@ -112,8 +111,20 @@ test("renders the Printopus pages with the production Next.js server", { timeout
     assert.equal(catalogResponse.status, 200);
     const catalog = await catalogResponse.json();
     assert.equal(catalog.currency, "BYN");
-    assert.equal(catalog.products.find((product) => product.slug === "shirt")?.basePrice, 15);
+    const publicShirt = catalog.products.find((product) => product.slug === "shirt");
+    const publicCap = catalog.products.find((product) => product.slug === "cap");
+    const publicDtf = publicShirt?.printMethods.find((method) => method.slug === "dtf");
+    const publicA4 = publicDtf?.formats.find((format) => format.code === "A4");
+    assert(publicShirt?.basePrice > 0);
+    assert(publicCap);
+    assert(publicDtf);
+    assert(publicA4);
+    assert.deepEqual(publicCap.printMethods.map((method) => method.slug), ["dtf", "embroidery"]);
+    assert(publicCap.printMethods.every((method) => method.formats.every((format) => ["A7", "A6"].includes(format.code))));
+    assert(publicShirt.options.every((option) => option.priceDelta === 0));
     assert.deepEqual(catalog.volumeDiscounts.map((discount) => discount.minQuantity), [20, 50, 100, 200]);
+    const expectedOrderTotal = Math.round((publicShirt.basePrice + publicDtf.priceDelta + publicA4.priceDelta) * 20 * 0.95 * 100) / 100;
+    const expectedUnitPrice = Math.round(expectedOrderTotal / 20 * 100) / 100;
 
     const protectedPageResponse = await fetch(`${baseUrl}/admin`, { redirect: "manual" });
     assert.equal(protectedPageResponse.status, 307);
@@ -135,6 +146,27 @@ test("renders the Printopus pages with the production Next.js server", { timeout
       body: JSON.stringify({ customerName: "А", customerPhone: "123" }),
     });
     assert.equal(invalidOrderResponse.status, 400);
+
+    const incompatiblePrintResponse = await fetch(`${baseUrl}/api/orders`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        customerName: "Проверка совместимости",
+        customerPhone: "+375 (29) 555-20-30",
+        contactMethod: "phone",
+        fulfillmentMethod: "pickup",
+        productSlug: "cap",
+        color: "navy",
+        size: "universal",
+        printMethodSlug: "dtf",
+        printFormatCode: "A3",
+        placement: "center",
+        quantity: 1,
+        design: { front: [] },
+      }),
+    });
+    assert.equal(incompatiblePrintResponse.status, 400);
+    assert.match((await incompatiblePrintResponse.json()).error.message, /недоступны для выбранного изделия/i);
 
     const validOrderPayload = {
         customerName: "Проверка API",
@@ -179,7 +211,7 @@ test("renders the Printopus pages with the production Next.js server", { timeout
     createdOrderId = createdOrder.order.id;
     assert.match(createdOrder.order.orderNumber, /^BY-\d{8}-[A-F0-9]{6}$/);
     assert.equal(createdOrder.order.discountPercent, 5);
-    assert.equal(createdOrder.order.total, 494);
+    assert.equal(createdOrder.order.total, expectedOrderTotal);
     assert.equal(createdOrder.order.assetCount, 1);
 
     const database = new pg.Client({ connectionString: process.env.DATABASE_URL });
@@ -190,9 +222,9 @@ test("renders the Printopus pages with the production Next.js server", { timeout
         [createdOrderId],
       );
       assert.equal(persisted.rowCount, 1);
-      assert.equal(Number(persisted.rows[0].total), 494);
+      assert.equal(Number(persisted.rows[0].total), expectedOrderTotal);
       assert.equal(persisted.rows[0].quantity, 20);
-      assert.equal(Number(persisted.rows[0].unitPrice), 24.7);
+      assert.equal(Number(persisted.rows[0].unitPrice), expectedUnitPrice);
     } finally {
       await database.end();
     }
@@ -218,7 +250,8 @@ test("renders the Printopus pages with the production Next.js server", { timeout
     const adminCatalog = await adminCatalogResponse.json();
     const adminShirt = adminCatalog.products.find((product) => product.slug === "shirt");
     assert(adminShirt);
-    catalogProductId = adminShirt.id;
+    assert(adminShirt.options.every((option) => option.priceDelta === 0));
+    assert(adminShirt.printMethods.some((method) => method.slug === "dtf" && method.formats.some((format) => format.code === "A4")));
 
     const rejectedCatalogUpdate = await fetch(`${baseUrl}/api/admin/catalog`, {
       method: "PATCH",
@@ -227,13 +260,6 @@ test("renders the Printopus pages with the production Next.js server", { timeout
     });
     assert.equal(rejectedCatalogUpdate.status, 403);
 
-    const catalogUpdate = await fetch(`${baseUrl}/api/admin/catalog`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json", cookie: sessionCookie, origin: baseUrl },
-      body: JSON.stringify({ resource: "product", id: adminShirt.id, changes: { basePrice: adminShirt.basePrice } }),
-    });
-    assert.equal(catalogUpdate.status, 200);
-
     const discountResponse = await fetch(`${baseUrl}/api/admin/catalog`, {
       method: "POST",
       headers: { "content-type": "application/json", cookie: sessionCookie, origin: baseUrl },
@@ -241,6 +267,28 @@ test("renders the Printopus pages with the production Next.js server", { timeout
     });
     assert.equal(discountResponse.status, 201);
     createdDiscountId = (await discountResponse.json()).item.id;
+
+    const catalogUpdate = await fetch(`${baseUrl}/api/admin/catalog`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie: sessionCookie, origin: baseUrl },
+      body: JSON.stringify({ resource: "discount", id: createdDiscountId, changes: { percent: 3 } }),
+    });
+    assert.equal(catalogUpdate.status, 200);
+
+    const rejectedCatalogDelete = await fetch(`${baseUrl}/api/admin/catalog`, {
+      method: "DELETE",
+      headers: { "content-type": "application/json", cookie: sessionCookie },
+      body: JSON.stringify({ resource: "discount", id: createdDiscountId }),
+    });
+    assert.equal(rejectedCatalogDelete.status, 403);
+
+    const catalogDelete = await fetch(`${baseUrl}/api/admin/catalog`, {
+      method: "DELETE",
+      headers: { "content-type": "application/json", cookie: sessionCookie, origin: baseUrl },
+      body: JSON.stringify({ resource: "discount", id: createdDiscountId }),
+    });
+    assert.equal(catalogDelete.status, 200);
+    assert.deepEqual(await catalogDelete.json(), { deleted: true });
 
     const statusResponse = await fetch(`${baseUrl}/api/admin/orders/${createdOrderId}`, {
       method: "PATCH",
@@ -276,7 +324,6 @@ test("renders the Printopus pages with the production Next.js server", { timeout
       await database.connect();
       try {
         await database.query('DELETE FROM admin_audit_log WHERE "entityId" = $1', [createdOrderId]);
-        if (catalogProductId) await database.query('DELETE FROM admin_audit_log WHERE "entityId" = $1', [catalogProductId]);
         if (createdDiscountId) {
           await database.query('DELETE FROM admin_audit_log WHERE "entityId" = $1', [createdDiscountId]);
           await database.query("DELETE FROM volume_discounts WHERE id = $1", [createdDiscountId]);
