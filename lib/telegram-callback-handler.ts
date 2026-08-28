@@ -12,12 +12,21 @@ export interface TelegramCallbackQuery {
   from: { first_name: string; username?: string };
 }
 
+const STATUS_NAMES: Record<string, string> = {
+  NEW: "Новый",
+  IN_PRODUCTION: "В производстве",
+  READY: "Готов к выдаче",
+  COMPLETED: "Завершен",
+  CANCELLED: "Отменен",
+};
+
 /**
  * Handles incoming Telegram inline button callback queries
  */
 export async function handleTelegramCallbackQuery(query: TelegramCallbackQuery): Promise<boolean> {
   const { id: callbackId, data, message, from } = query;
   if (!data || !data.startsWith("st:") || !message) {
+    if (callbackId) await answerCallbackQuery(callbackId, "Неверный запрос");
     return false;
   }
 
@@ -26,25 +35,31 @@ export async function handleTelegramCallbackQuery(query: TelegramCallbackQuery):
   const orderId = parts[2];
 
   if (!Object.values(OrderStatus).includes(targetStatus) || !orderId) {
+    await answerCallbackQuery(callbackId, "Неизвестный статус");
     return false;
   }
 
-  try {
-    const updatedOrder = await database.$transaction(async (tx) => {
-      const current = await tx.order.findUnique({
-        where: { id: orderId },
-        include: {
-          items: {
-            include: {
-              assets: {
-                select: { id: true, originalName: true, mimeType: true, sizeBytes: true },
-              },
-            },
-          },
-        },
-      });
-      if (!current) return null;
+  const readableStatus = STATUS_NAMES[targetStatus] ?? targetStatus;
 
+  try {
+    const existing = await database.order.findUnique({
+      where: { id: orderId },
+      select: { id: true, orderNumber: true, status: true },
+    });
+
+    if (!existing) {
+      await answerCallbackQuery(callbackId, "❌ Заказ не найден");
+      return false;
+    }
+
+    if (existing.status === targetStatus) {
+      await answerCallbackQuery(callbackId, `ℹ️ Заказ #${existing.orderNumber} уже в статусе "${readableStatus}"`);
+      return true;
+    }
+
+    const senderName = from.username ? `@${from.username}` : from.first_name;
+
+    const updatedOrder = await database.$transaction(async (tx) => {
       const updated = await tx.order.update({
         where: { id: orderId },
         data: { status: targetStatus },
@@ -59,11 +74,10 @@ export async function handleTelegramCallbackQuery(query: TelegramCallbackQuery):
         },
       });
 
-      const senderName = from.username ? `@${from.username}` : from.first_name;
       await tx.orderStatusHistory.create({
         data: {
           orderId,
-          fromStatus: current.status,
+          fromStatus: existing.status,
           toStatus: targetStatus,
           note: `Изменено из Telegram пользователем ${senderName}`,
           changedBy: `Telegram (${senderName})`,
@@ -74,14 +88,10 @@ export async function handleTelegramCallbackQuery(query: TelegramCallbackQuery):
     });
 
     if (updatedOrder) {
-      const statusText =
-        targetStatus === OrderStatus.IN_PRODUCTION ? "В производстве"
-        : targetStatus === OrderStatus.READY ? "Готов к выдаче"
-        : targetStatus === OrderStatus.COMPLETED ? "Завершен"
-        : targetStatus === OrderStatus.CANCELLED ? "Отменен"
-        : targetStatus;
+      // 1. Immediately acknowledge Telegram button click so the button never freezes
+      await answerCallbackQuery(callbackId, `✅ Заказ #${updatedOrder.orderNumber}: ${readableStatus}`);
 
-      await answerCallbackQuery(callbackId, `✅ Статус заказа #${updatedOrder.orderNumber} изменен: ${statusText}`);
+      // 2. Update Telegram message text and buttons in live chat
       await updateTelegramMessageStatus(message.chat.id, message.message_id, {
         id: updatedOrder.id,
         orderNumber: updatedOrder.orderNumber,
@@ -108,11 +118,12 @@ export async function handleTelegramCallbackQuery(query: TelegramCallbackQuery):
         })),
       });
 
-      console.log(`[Telegram Handler] Order #${updatedOrder.orderNumber} status changed to ${targetStatus} by ${from.username ?? from.first_name}`);
+      console.log(`[Telegram Handler] Order #${updatedOrder.orderNumber} status changed: ${existing.status} -> ${targetStatus} by ${senderName}`);
       return true;
     }
   } catch (err) {
     console.error("[Telegram Handler] Error updating order status:", err);
+    await answerCallbackQuery(callbackId, "❌ Ошибка при обновлении статуса");
   }
 
   return false;
