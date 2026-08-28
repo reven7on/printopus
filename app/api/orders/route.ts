@@ -20,6 +20,7 @@ import {
 } from "../../../lib/upload-policy";
 
 import { getClientIp, RateLimiter } from "../../../lib/rate-limiter";
+import { sendOrderNotificationToTelegram } from "../../../lib/telegram";
 
 export const runtime = "nodejs";
 
@@ -247,6 +248,37 @@ export async function POST(request: Request) {
     const { items: storedItems, ...createdOrder } = order;
     const assetCount = storedItems.reduce((total, item) => total + item.assets.length, 0);
     storedKeys.length = 0;
+
+    sendOrderNotificationToTelegram({
+      id: createdOrder.id,
+      orderNumber: createdOrder.orderNumber,
+      customerName: input.customerName,
+      customerPhone: input.customerPhone,
+      contactMethod: input.contactMethod,
+      fulfillmentMethod: input.fulfillmentMethod,
+      deliveryAddress: input.deliveryAddress,
+      comment: input.comment,
+      subtotal: Number(createdOrder.subtotal),
+      discountPercent: Number(createdOrder.discountPercent),
+      total: Number(createdOrder.total),
+      status: createdOrder.status,
+      items: [
+        {
+          productName: input.productSlug,
+          placement: input.placement,
+          quantity: input.quantity,
+          baseUnitPrice: Number(createdOrder.subtotal) / input.quantity,
+          unitPrice: Number(createdOrder.total) / input.quantity,
+          total: Number(createdOrder.total),
+          assets: preparedAssets.map((a) => ({
+            id: a.id,
+            originalName: a.originalName,
+            mimeType: a.mimeType,
+            sizeBytes: a.bytes.byteLength,
+          })),
+        },
+      ],
+    }).catch((err) => console.error("Async Telegram notification error:", err));
 
     return Response.json(
       {
