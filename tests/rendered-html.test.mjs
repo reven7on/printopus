@@ -198,10 +198,10 @@ test("renders the Printopus pages with the production Next.js server", { timeout
     const rejectedSvgResponse = await fetch(`${baseUrl}/api/orders`, { method: "POST", body: svgUpload });
     assert.equal(rejectedSvgResponse.status, 415);
 
-    const validImage = await readFile(path.join(projectRoot, "public/product-shirt.webp"));
+    const validImage = await readFile(path.join(projectRoot, "public/test-octopus-logo.png"));
     const multipartOrder = new FormData();
     multipartOrder.append("order", JSON.stringify(validOrderPayload));
-    multipartOrder.append("files", new File([validImage], "shirt-design.webp", { type: "image/webp" }));
+    multipartOrder.append("files", new File([validImage], "octopus_logo.png", { type: "image/png" }));
     const orderResponse = await fetch(`${baseUrl}/api/orders`, {
       method: "POST",
       body: multipartOrder,
@@ -304,14 +304,14 @@ test("renders the Printopus pages with the production Next.js server", { timeout
     assert.equal(orderDetails.order.statusHistory[0].note, "Проверка истории статусов");
     const storedAsset = orderDetails.order.items[0].assets[0];
     assert(storedAsset);
-    assert.equal(storedAsset.mimeType, "image/webp");
+    assert.equal(storedAsset.mimeType, "image/png");
     assert(storedAsset.width > 0 && storedAsset.height > 0);
 
     const unauthorizedAssetResponse = await fetch(`${baseUrl}/api/admin/assets/${storedAsset.id}`);
     assert.equal(unauthorizedAssetResponse.status, 401);
     const assetResponse = await fetch(`${baseUrl}/api/admin/assets/${storedAsset.id}`, { headers: { cookie: sessionCookie } });
     assert.equal(assetResponse.status, 200);
-    assert.equal(assetResponse.headers.get("content-type"), "image/webp");
+    assert.equal(assetResponse.headers.get("content-type"), "image/png");
     assert.equal(assetResponse.headers.get("x-content-type-options"), "nosniff");
     assert.match(assetResponse.headers.get("content-disposition") ?? "", /^attachment;/);
     assert((await assetResponse.arrayBuffer()).byteLength > 1_000);
