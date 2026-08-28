@@ -34,6 +34,9 @@ test("formatOrderNotificationHtml formats complete order details", () => {
         baseUnitPrice: 20,
         unitPrice: 18,
         total: 90,
+        textElements: [
+          { content: "PRINTOPUS TEAM", fontFamily: "Montserrat", color: "#FF0000" },
+        ],
         assets: [
           {
             id: "asset-1",
@@ -54,6 +57,8 @@ test("formatOrderNotificationHtml formats complete order details", () => {
   assert(html.includes("Очень срочный принт!"));
   assert(html.includes("Футболка Oversize"));
   assert(html.includes("Черный"));
+  assert(html.includes("PRINTOPUS TEAM"));
+  assert(html.includes("Montserrat"));
   assert(html.includes("my_cool_print.png"));
   assert(html.includes("2.00 MB"));
   assert(html.includes("90.00 BYN"));

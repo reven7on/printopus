@@ -14,6 +14,7 @@ import {
 import { isValidBelarusianPhone } from "../order-validation";
 import { usePublicCatalog } from "../use-public-catalog";
 import { getAutomaticPrintEstimate } from "./editor-math";
+import { generateMockupPreviewBlob } from "./mockup-generator";
 
 type ItemId = "shirt" | "hoodie" | "polo" | "cap" | "bag";
 type ViewAngle = "front" | "back" | "sleeve_left" | "sleeve_right";
@@ -1373,6 +1374,21 @@ export default function Configurator() {
       const formData = new FormData();
       formData.append("order", JSON.stringify(orderPayload));
       files.forEach((file) => formData.append("files", file, file.name));
+
+      if (currentPrintZone) {
+        try {
+          const previewBlob = await generateMockupPreviewBlob(
+            currentMockupImage,
+            currentPrintZone,
+            designs[viewAngle] ?? [],
+          );
+          if (previewBlob) {
+            formData.append("preview", previewBlob, "mockup_preview.png");
+          }
+        } catch (err) {
+          console.warn("[Configurator] Could not generate mockup preview:", err);
+        }
+      }
 
       const response = await fetch("/api/orders", {
         method: "POST",

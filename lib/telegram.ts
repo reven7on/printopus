@@ -13,6 +13,7 @@ export interface TelegramOrderPayload {
   discountPercent: number;
   total: number;
   status: string;
+  previewBuffer?: Buffer | Uint8Array | null;
   items: Array<{
     productName: string;
     colorLabel?: string | null;
@@ -22,6 +23,13 @@ export interface TelegramOrderPayload {
     baseUnitPrice: number;
     unitPrice: number;
     total: number;
+    textElements?: Array<{
+      content: string;
+      fontFamily?: string;
+      fontWeight?: string | number;
+      color?: string;
+      outlined?: boolean;
+    }>;
     assets?: Array<{
       id: string;
       originalName: string;
@@ -77,8 +85,16 @@ export function formatOrderNotificationHtml(order: TelegramOrderPayload): string
     html += `\n<b>${index + 1}. ${escapeTgHtml(item.productName)}</b>\n`;
     if (item.colorLabel) html += `   • Цвет: ${escapeTgHtml(item.colorLabel)}\n`;
     if (item.sizeLabel) html += `   • Размер: ${escapeTgHtml(item.sizeLabel)}\n`;
-    if (item.placement) html += `   • Расположение принта: ${escapeTgHtml(item.placement)}\n`;
+    if (item.placement) html += `   • Нанесение: ${escapeTgHtml(item.placement)}\n`;
     html += `   • Тираж: <b>${item.quantity} шт.</b> (${item.unitPrice.toFixed(2)} BYN/шт)\n`;
+
+    if (item.textElements && item.textElements.length > 0) {
+      html += `   • ✍️ <b>Текст надписей:</b>\n`;
+      item.textElements.forEach((txt) => {
+        const fontInfo = txt.fontFamily ? ` (Шрифт: ${escapeTgHtml(txt.fontFamily)}, цвет: ${escapeTgHtml(txt.color ?? "стандартный")})` : "";
+        html += `     - <i>"${escapeTgHtml(txt.content)}"</i>${fontInfo}\n`;
+      });
+    }
 
     if (item.assets && item.assets.length > 0) {
       html += `   • 📁 <b>Исходники принта (${item.assets.length}):</b>\n`;
@@ -130,7 +146,7 @@ export function buildOrderInlineKeyboard(orderId: string, currentStatus: string)
 }
 
 /**
- * Send order notification to Telegram admin chat
+ * Send order notification to Telegram admin chat (with photo preview if available)
  */
 export async function sendOrderNotificationToTelegram(order: TelegramOrderPayload): Promise<boolean> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -144,6 +160,34 @@ export async function sendOrderNotificationToTelegram(order: TelegramOrderPayloa
   const text = formatOrderNotificationHtml(order);
   const reply_markup = buildOrderInlineKeyboard(order.id, order.status);
 
+  // If preview image buffer is present, try sendPhoto first
+  if (order.previewBuffer && order.previewBuffer.length > 0) {
+    try {
+      const formData = new FormData();
+      formData.append("chat_id", chatId);
+      formData.append(
+        "photo",
+        new Blob([new Uint8Array(order.previewBuffer)], { type: "image/png" }),
+        `mockup_${order.orderNumber}.png`,
+      );
+      formData.append("caption", text);
+      formData.append("parse_mode", "HTML");
+      formData.append("reply_markup", JSON.stringify(reply_markup));
+
+      const response = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = (await response.json()) as { ok: boolean; description?: string };
+      if (data.ok) return true;
+      console.warn("[Telegram Bot] sendPhoto returned false, fallback to sendMessage:", data.description);
+    } catch (err) {
+      console.warn("[Telegram Bot] Exception sending photo preview, fallback to sendMessage:", err);
+    }
+  }
+
+  // Fallback to text sendMessage
   try {
     const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: "POST",
@@ -192,7 +236,7 @@ export async function answerCallbackQuery(callbackQueryId: string, text: string)
 }
 
 /**
- * Edit message text & markup when order status changes via Telegram button
+ * Edit message text / caption & markup when order status changes via Telegram button
  */
 export async function updateTelegramMessageStatus(
   chatId: number | string,
@@ -205,6 +249,26 @@ export async function updateTelegramMessageStatus(
   const text = formatOrderNotificationHtml(order);
   const reply_markup = buildOrderInlineKeyboard(order.id, order.status);
 
+  // Try editMessageCaption first in case original was a photo message
+  try {
+    const captionResponse = await fetch(`https://api.telegram.org/bot${token}/editMessageCaption`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatId,
+        message_id: messageId,
+        caption: text,
+        parse_mode: "HTML",
+        reply_markup,
+      }),
+    });
+    const captionData = (await captionResponse.json()) as { ok: boolean };
+    if (captionData.ok) return;
+  } catch {
+    // Ignore and fallback to text edit
+  }
+
+  // Fallback to editMessageText
   try {
     await fetch(`https://api.telegram.org/bot${token}/editMessageText`, {
       method: "POST",

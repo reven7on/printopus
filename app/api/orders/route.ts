@@ -76,7 +76,18 @@ async function readOrderRequest(request: Request) {
     if (files.some((entry) => typeof entry === "string")) {
       throw new UploadValidationError("Файлы переданы в неверном формате.");
     }
-    return { value, files: files as File[] };
+
+    const previewEntry = formData.get("preview");
+    let previewBuffer: Buffer | undefined;
+    if (previewEntry && typeof previewEntry !== "string" && previewEntry.size > 0 && previewEntry.size < 5 * 1024 * 1024) {
+      try {
+        previewBuffer = Buffer.from(await previewEntry.arrayBuffer());
+      } catch {
+        // Ignore preview read error
+      }
+    }
+
+    return { value, files: files as File[], previewBuffer };
   }
 
   if (!contentType.startsWith("application/json")) {
@@ -241,53 +252,79 @@ export async function POST(request: Request) {
           discountPercent: true,
           total: true,
           createdAt: true,
-          items: { select: { assets: { select: { id: true } } } },
+          items: {
+            select: {
+              productName: true,
+              colorLabel: true,
+              sizeLabel: true,
+              baseUnitPrice: true,
+              unitPrice: true,
+              total: true,
+              assets: { select: { id: true, originalName: true, mimeType: true, sizeBytes: true } },
+            },
+          },
         },
       });
     });
-    const { items: storedItems, ...createdOrder } = order;
-    const assetCount = storedItems.reduce((total, item) => total + item.assets.length, 0);
-    storedKeys.length = 0;
+
+    const textElements: Array<{ content: string; fontFamily?: string; color?: string }> = [];
+    if (input.design && typeof input.design === "object") {
+      Object.values(input.design).forEach((viewElements) => {
+        if (Array.isArray(viewElements)) {
+          viewElements.forEach((el) => {
+            if (el && typeof el === "object" && el.type === "text" && typeof el.content === "string") {
+              textElements.push({
+                content: el.content,
+                fontFamily: typeof el.fontFamily === "string" ? el.fontFamily : undefined,
+                color: typeof el.color === "string" ? el.color : undefined,
+              });
+            }
+          });
+        }
+      });
+    }
 
     sendOrderNotificationToTelegram({
-      id: createdOrder.id,
-      orderNumber: createdOrder.orderNumber,
+      id: order.id,
+      orderNumber: order.orderNumber,
       customerName: input.customerName,
       customerPhone: input.customerPhone,
       contactMethod: input.contactMethod,
       fulfillmentMethod: input.fulfillmentMethod,
       deliveryAddress: input.deliveryAddress,
       comment: input.comment,
-      subtotal: Number(createdOrder.subtotal),
-      discountPercent: Number(createdOrder.discountPercent),
-      total: Number(createdOrder.total),
-      status: createdOrder.status,
-      items: [
-        {
-          productName: input.productSlug,
-          placement: input.placement,
-          quantity: input.quantity,
-          baseUnitPrice: Number(createdOrder.subtotal) / input.quantity,
-          unitPrice: Number(createdOrder.total) / input.quantity,
-          total: Number(createdOrder.total),
-          assets: preparedAssets.map((a) => ({
-            id: a.id,
-            originalName: a.originalName,
-            mimeType: a.mimeType,
-            sizeBytes: a.bytes.byteLength,
-          })),
-        },
-      ],
+      subtotal: Number(order.subtotal),
+      discountPercent: Number(order.discountPercent),
+      total: Number(order.total),
+      status: order.status,
+      previewBuffer: parsedRequest.previewBuffer,
+      items: order.items.map((item) => ({
+        productName: item.productName,
+        colorLabel: item.colorLabel,
+        sizeLabel: item.sizeLabel,
+        placement: input.placement,
+        quantity: input.quantity,
+        baseUnitPrice: Number(item.baseUnitPrice),
+        unitPrice: Number(item.unitPrice),
+        total: Number(item.total),
+        textElements,
+        assets: item.assets,
+      })),
     }).catch((err) => console.error("Async Telegram notification error:", err));
+
+    const assetCount = order.items.reduce((total, item) => total + item.assets.length, 0);
+    storedKeys.length = 0;
+
+    const { items: _items, ...createdOrder } = order;
 
     return Response.json(
       {
         order: {
           ...createdOrder,
           assetCount,
-          subtotal: Number(createdOrder.subtotal),
-          discountPercent: Number(createdOrder.discountPercent),
-          total: Number(createdOrder.total),
+          subtotal: Number(order.subtotal),
+          discountPercent: Number(order.discountPercent),
+          total: Number(order.total),
         },
       },
       { status: 201, headers: { "Cache-Control": "no-store" } },
