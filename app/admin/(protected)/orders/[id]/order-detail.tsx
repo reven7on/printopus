@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
+import { GRAPHIC_SHAPES_SVG } from "../../../../../lib/graphic-shapes";
 
 type OrderStatus = "NEW" | "CONFIRMED" | "IN_PRODUCTION" | "READY" | "COMPLETED" | "CANCELLED";
 type PrintView = "front" | "back" | "sleeve_left" | "sleeve_right";
@@ -112,35 +113,142 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function getSavedPrintViews(item: Order["items"][number]): Array<{ view: PrintView; placement: string; artwork: Order["items"][number]["assets"][number] | undefined }> {
+function getSavedPrintViews(item: Order["items"][number]): Array<{
+  view: PrintView;
+  placement: string;
+  artwork?: Order["items"][number]["assets"][number];
+  elements: Array<Record<string, unknown>>;
+}> {
   const views: PrintView[] = ["front", "back", "sleeve_left", "sleeve_right"];
   const design = isRecord(item.design) ? item.design : null;
   let imageIndex = 0;
+
   const savedViews = views.flatMap((view) => {
     const elements = design && Array.isArray(design[view]) ? design[view].filter(isRecord) : [];
     const imageCount = elements.filter((element) => element.type === "image").length;
     const artwork = imageCount > 0 ? item.assets[imageIndex] : undefined;
     imageIndex += imageCount;
+
     if (elements.length === 0) return [];
     const placement = view === "front"
       ? item.placement === "center" || item.placement === "chest_left" ? item.placement : "center"
       : view;
-    return [{ view, placement, artwork }];
+
+    return [{ view, placement, artwork, elements }];
   });
+
   if (savedViews.length) return savedViews;
+
   const placement = item.placement ?? "center";
   const view: PrintView = placement === "back" || placement === "sleeve_left" || placement === "sleeve_right" ? placement : "front";
-  return [{ view, placement, artwork: item.assets.find((asset) => asset.mimeType.startsWith("image/")) }];
+  const fallbackArtwork = item.assets.find((asset) => asset.mimeType.startsWith("image/"));
+  return [{ view, placement, artwork: fallbackArtwork, elements: fallbackArtwork ? [{ type: "image" }] : [] }];
+}
+
+function AdminElementItem({
+  element,
+  artwork,
+}: {
+  element: Record<string, unknown>;
+  artwork?: Order["items"][number]["assets"][number];
+}) {
+  const type = String(element.type ?? "");
+  const content = String(element.content ?? "");
+  const color = String(element.color ?? "#111111");
+  const fontFamily = String(element.fontFamily ?? "Inter");
+
+  if (type === "image" && artwork && artwork.mimeType.startsWith("image/")) {
+    return (
+      <i
+        style={{ backgroundImage: `url(/api/admin/assets/${artwork.id}?preview=1)` }}
+        aria-hidden="true"
+      />
+    );
+  }
+
+  if (type === "text" && content) {
+    return (
+      <span
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: "100%",
+          height: "100%",
+          color,
+          fontFamily: `${fontFamily}, sans-serif`,
+          fontWeight: 800,
+          fontSize: content.length > 15 ? "11px" : "13px",
+          textAlign: "center",
+          lineHeight: 1.2,
+          wordBreak: "break-word",
+          padding: "2px",
+          textShadow: "0 0 2px rgba(255,255,255,0.8)",
+        }}
+      >
+        {content}
+      </span>
+    );
+  }
+
+  if (type === "shape" && content) {
+    const shapeSvg = GRAPHIC_SHAPES_SVG[content] ?? GRAPHIC_SHAPES_SVG.star;
+    return (
+      <span
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: "100%",
+          height: "100%",
+          color,
+          padding: "4px",
+        }}
+        dangerouslySetInnerHTML={{
+          __html: `<svg viewBox="0 0 100 100" fill="${color}" style="width:75%;height:75%;display:block">${shapeSvg}</svg>`,
+        }}
+      />
+    );
+  }
+
+  return null;
 }
 
 function OrderPrintPreviews({ item }: { item: Order["items"][number] }) {
   const previews = getSavedPrintViews(item);
-  return <div className="admin-print-preview-list">{previews.map(({ view, placement, artwork }) => {
-    const mockup = getMockupPath(item, view);
-    const label = placementLabels[placement] ?? placement;
-    if (!mockup) return null;
-    return <figure className="admin-print-preview" key={view}><div className="admin-garment-preview" data-placement={placement} style={{ backgroundImage: `url(${mockup})` }} role="img" aria-label={`${item.productName}: ${label}`}><span className="admin-print-zone-marker" style={getPrintZoneStyle(item.product?.slug, view)}>{artwork?.mimeType.startsWith("image/") ? <i style={{ backgroundImage: `url(/api/admin/assets/${artwork.id}?preview=1)` }} aria-hidden="true" /> : "Зона печати"}</span></div><figcaption>{label}</figcaption></figure>;
-  })}</div>;
+  return (
+    <div className="admin-print-preview-list">
+      {previews.map(({ view, placement, artwork, elements }) => {
+        const mockup = getMockupPath(item, view);
+        const label = placementLabels[placement] ?? placement;
+        if (!mockup) return null;
+        return (
+          <figure className="admin-print-preview" key={view}>
+            <div
+              className="admin-garment-preview"
+              data-placement={placement}
+              style={{ backgroundImage: `url(${mockup})` }}
+              role="img"
+              aria-label={`${item.productName}: ${label}`}
+            >
+              <span className="admin-print-zone-marker" style={getPrintZoneStyle(item.product?.slug, view)}>
+                {elements.length > 0 ? (
+                  elements.map((el, i) => (
+                    <AdminElementItem key={i} element={el} artwork={artwork} />
+                  ))
+                ) : artwork?.mimeType.startsWith("image/") ? (
+                  <i style={{ backgroundImage: `url(/api/admin/assets/${artwork.id}?preview=1)` }} aria-hidden="true" />
+                ) : (
+                  <span style={{ fontSize: "10px", color: "#666" }}>Зона печати</span>
+                )}
+              </span>
+            </div>
+            <figcaption>{label}</figcaption>
+          </figure>
+        );
+      })}
+    </div>
+  );
 }
 
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
