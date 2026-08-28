@@ -259,7 +259,31 @@ export async function updateTelegramMessageStatus(
   const text = formatOrderNotificationHtml(order);
   const reply_markup = buildOrderInlineKeyboard(order.id, order.status);
 
-  // Try editMessageCaption first in case original was a photo message
+  // Try editMessageText first (since main order message is text)
+  try {
+    const textResponse = await fetch(`https://api.telegram.org/bot${token}/editMessageText`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatId,
+        message_id: messageId,
+        text,
+        parse_mode: "HTML",
+        reply_markup,
+        disable_web_page_preview: true,
+      }),
+    });
+    const textData = (await textResponse.json()) as { ok: boolean; description?: string };
+    if (textData.ok) {
+      console.log(`[Telegram Bot] Successfully updated message #${messageId} text to status ${order.status}`);
+      return;
+    }
+    console.warn(`[Telegram Bot] editMessageText returned ok:false (${textData.description}), trying editMessageCaption`);
+  } catch (textErr) {
+    console.warn("[Telegram Bot] Exception in editMessageText:", textErr);
+  }
+
+  // Fallback to editMessageCaption in case original message was a photo caption
   try {
     const captionResponse = await fetch(`https://api.telegram.org/bot${token}/editMessageCaption`, {
       method: "POST",
@@ -272,28 +296,14 @@ export async function updateTelegramMessageStatus(
         reply_markup,
       }),
     });
-    const captionData = (await captionResponse.json()) as { ok: boolean };
-    if (captionData.ok) return;
-  } catch {
-    // Ignore and fallback to text edit
-  }
-
-  // Fallback to editMessageText
-  try {
-    await fetch(`https://api.telegram.org/bot${token}/editMessageText`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: chatId,
-        message_id: messageId,
-        text,
-        parse_mode: "HTML",
-        reply_markup,
-        disable_web_page_preview: true,
-      }),
-    });
-  } catch (err) {
-    console.error("[Telegram Bot] Failed to edit Telegram message:", err);
+    const captionData = (await captionResponse.json()) as { ok: boolean; description?: string };
+    if (captionData.ok) {
+      console.log(`[Telegram Bot] Successfully updated message #${messageId} caption to status ${order.status}`);
+    } else {
+      console.error(`[Telegram Bot] editMessageCaption failed: ${captionData.description}`);
+    }
+  } catch (captionErr) {
+    console.error("[Telegram Bot] Exception in editMessageCaption:", captionErr);
   }
 }
 
