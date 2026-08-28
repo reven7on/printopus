@@ -617,6 +617,19 @@ function getMockupPath(itemKey: ItemId, colorKey: string, viewAngleKey: ViewAngl
   return `/mockups/spreadshirt/${prodFolder}/${prodFolder}-${finalColor}-${viewSlug}.png`;
 }
 
+type ConfiguratorDraft = {
+  timestamp: number;
+  item: ItemId;
+  color: string;
+  garmentSize: string;
+  method: string;
+  placement: PlacementId;
+  qty: number;
+  designs: DesignsByView;
+};
+
+const DRAFT_STORAGE_KEY = "printopus_configurator_draft_v1";
+
 function getFallbackColorsForItem(itemKey: ItemId) {
   const prodFolder = itemKey === "shirt" ? "tshirt" : itemKey;
   const availMap: Record<string, string[]> = {
@@ -664,6 +677,9 @@ export default function Configurator() {
   const [orderId, setOrderId] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submissionError, setSubmissionError] = useState("");
+  const [draftToRestore, setDraftToRestore] = useState<ConfiguratorDraft | null>(null);
+  const [draftDismissed, setDraftDismissed] = useState(false);
+
   const inputRef = useRef<HTMLInputElement>(null);
   const historyRef = useRef<DesignsByView[]>([]);
   const redoRef = useRef<DesignsByView[]>([]);
@@ -671,6 +687,71 @@ export default function Configurator() {
   const quickTextEditBeforeRef = useRef<DesignsByView | null>(null);
   const nextElementIdRef = useRef(0);
   const pendingUploadsRef = useRef(new Map<string, File>());
+
+  useEffect(() => {
+    try {
+      const savedJson = localStorage.getItem(DRAFT_STORAGE_KEY);
+      if (savedJson) {
+        const parsed: ConfiguratorDraft = JSON.parse(savedJson);
+        if (parsed && typeof parsed === "object" && Date.now() - (parsed.timestamp || 0) < 48 * 3600 * 1000) {
+          const hasElements = Object.values(parsed.designs || {}).some((list) => Array.isArray(list) && list.length > 0);
+          if (hasElements || (parsed.item && parsed.item !== "shirt") || (parsed.qty && parsed.qty !== 30)) {
+            setDraftToRestore(parsed);
+          }
+        }
+      }
+    } catch (e) {
+      console.error("Failed to parse saved draft", e);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (submitted) {
+      try { localStorage.removeItem(DRAFT_STORAGE_KEY); } catch {}
+      return;
+    }
+    const hasElements = Object.values(designs).some((list) => list.length > 0);
+    if (!hasElements && item === "shirt" && color === "khaki" && qty === 30) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      try {
+        const draft: ConfiguratorDraft = {
+          timestamp: Date.now(),
+          item,
+          color,
+          garmentSize,
+          method,
+          placement,
+          qty,
+          designs,
+        };
+        localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft));
+      } catch (e) {
+        console.error("Failed to save draft", e);
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [item, color, garmentSize, method, placement, qty, designs, submitted]);
+
+  function restoreDraft() {
+    if (!draftToRestore) return;
+    if (draftToRestore.item) setItem(draftToRestore.item);
+    if (draftToRestore.color) setColor(draftToRestore.color);
+    if (draftToRestore.garmentSize) setGarmentSize(draftToRestore.garmentSize);
+    if (draftToRestore.method) setMethod(draftToRestore.method);
+    if (draftToRestore.placement) setPlacement(draftToRestore.placement);
+    if (draftToRestore.qty) setQty(draftToRestore.qty);
+    if (draftToRestore.designs) setDesigns(draftToRestore.designs);
+    setDraftToRestore(null);
+    setDraftDismissed(true);
+  }
+
+  function dismissDraft() {
+    setDraftToRestore(null);
+    setDraftDismissed(true);
+    try { localStorage.removeItem(DRAFT_STORAGE_KEY); } catch {}
+  }
 
   function resolveColors(itemKey: ItemId) {
     if (!catalogReady) return getFallbackColorsForItem(itemKey);
@@ -1219,6 +1300,40 @@ export default function Configurator() {
     setSnapGuides({ vertical: false, horizontal: false });
   }
 
+  const pinchRef = useRef<{ startDist: number; startScale: number; elementId: string } | null>(null);
+
+  function handleElementTouchStart(event: React.TouchEvent<HTMLButtonElement>, element: DesignElement) {
+    if (event.touches.length === 2) {
+      const t1 = event.touches[0];
+      const t2 = event.touches[1];
+      const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+      pinchRef.current = {
+        startDist: Math.max(1, dist),
+        startScale: element.scale,
+        elementId: element.id,
+      };
+    }
+  }
+
+  function handleElementTouchMove(event: React.TouchEvent<HTMLButtonElement>, element: DesignElement) {
+    if (event.touches.length === 2 && pinchRef.current && pinchRef.current.elementId === element.id) {
+      const t1 = event.touches[0];
+      const t2 = event.touches[1];
+      const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+      if (pinchRef.current.startDist > 0) {
+        const ratio = dist / pinchRef.current.startDist;
+        const newScale = +clamp(pinchRef.current.startScale * ratio, 0.35, 2.2).toFixed(2);
+        updateElementLive(viewAngle, element.id, { scale: newScale });
+      }
+    }
+  }
+
+  function handleElementTouchEnd() {
+    if (pinchRef.current) {
+      pinchRef.current = null;
+    }
+  }
+
   async function handleSubmitOrder(e?: React.SyntheticEvent) {
     if (e) e.preventDefault();
     if (!customerName.trim()) return;
@@ -1367,6 +1482,23 @@ export default function Configurator() {
         </div>
       </header>
 
+      {draftToRestore && !draftDismissed && !submitted && (
+        <div className="config-draft-banner" role="alert">
+          <div className="config-draft-banner-content">
+            <ConfigIcon name="edit" size={18} />
+            <span>Нашли ваш сохранённый макет ({draftToRestore.qty} шт.). Восстановить?</span>
+          </div>
+          <div className="config-draft-banner-actions">
+            <button type="button" className="button button-small" onClick={restoreDraft}>
+              Восстановить макет
+            </button>
+            <button type="button" className="button button-small outline" onClick={dismissDraft}>
+              Сбросить
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="config-stepper-wrapper">
         <div
           className="config-progress-track"
@@ -1496,6 +1628,10 @@ export default function Configurator() {
                         onPointerMove={handleTransformMove}
                         onPointerUp={finishTransformGesture}
                         onPointerCancel={finishTransformGesture}
+                        onTouchStart={(event) => handleElementTouchStart(event, element)}
+                        onTouchMove={(event) => handleElementTouchMove(event, element)}
+                        onTouchEnd={handleElementTouchEnd}
+                        onTouchCancel={handleElementTouchEnd}
                       >
                         {element.type === "image" ? (
                           <>
