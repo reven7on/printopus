@@ -111,6 +111,7 @@ export default function AdminApp({ username }: { username: string }) {
   const [orderSort, setOrderSort] = useState(() => searchParams.get("sort") ?? "date-desc");
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshingOrders, setRefreshingOrders] = useState(false);
   const [saving, setSaving] = useState("");
   const [dirtyCatalogItems, setDirtyCatalogItems] = useState<Array<{ resource: DirtyCatalogResource; id: string }>>([]);
   const [notice, setNotice] = useState("");
@@ -131,6 +132,17 @@ export default function AdminApp({ username }: { username: string }) {
     setOrders(result.orders);
     setPagination(result.pagination);
   }, [orderSearch, orderSort, orderStatus]);
+
+  const handleRefreshOrders = useCallback(async () => {
+    setRefreshingOrders(true);
+    try {
+      await Promise.all([loadOrders(pagination.page), loadOverview()]);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось обновить заказы.");
+    } finally {
+      setRefreshingOrders(false);
+    }
+  }, [loadOrders, loadOverview, pagination.page]);
 
   const loadCatalog = useCallback(async () => {
     setCatalog(await api<Catalog>("/api/admin/catalog"));
@@ -453,11 +465,13 @@ export default function AdminApp({ username }: { username: string }) {
                 status={orderStatus}
                 sort={orderSort}
                 counts={overview?.counts}
+                refreshing={refreshingOrders}
                 onSearch={setOrderSearch}
                 onStatus={setOrderStatus}
                 onSort={setOrderSort}
                 onPage={(page) => loadOrders(page)}
                 onOpen={openOrder}
+                onRefresh={handleRefreshOrders}
               />
             )}
             {tab === "catalog" && catalog && (
@@ -536,11 +550,13 @@ function OrdersView(props: {
   status: string;
   sort: string;
   counts?: Record<OrderStatus, number>;
+  refreshing?: boolean;
   onSearch: (value: string) => void;
   onStatus: (value: string) => void;
   onSort: (value: string) => void;
   onPage: (page: number) => void;
   onOpen: (id: string) => void;
+  onRefresh?: () => void;
 }) {
   const filters: Array<{ label: string; value: string; statuses: OrderStatus[] }> = [
     { label: "Новые", value: "NEW", statuses: ["NEW"] },
@@ -559,7 +575,21 @@ function OrdersView(props: {
         <select value={props.sort} onChange={(event) => props.onSort(event.target.value)} aria-label="Сортировка заказов">
           <option value="date-desc">Сначала новые</option><option value="date-asc">Сначала старые</option><option value="total-desc">Сумма: больше</option><option value="total-asc">Сумма: меньше</option>
         </select>
-        <span className="admin-results-count">{props.pagination.total} заказов</span>
+        <div className="admin-toolbar-actions-group">
+          <span className="admin-results-count">{props.pagination.total} заказов</span>
+          {props.onRefresh && (
+            <button
+              type="button"
+              className={`admin-refresh-btn ${props.refreshing ? "is-refreshing" : ""}`}
+              onClick={props.onRefresh}
+              disabled={props.refreshing}
+              title="Обновить список заказов"
+              aria-label="Обновить список заказов"
+            >
+              <i>↻</i> <span>{props.refreshing ? "Обновление…" : "Обновить"}</span>
+            </button>
+          )}
+        </div>
       </div>
       <div className="admin-order-chips" aria-label="Быстрые фильтры заказов">
         <button type="button" className={!props.status ? "active" : ""} onClick={() => props.onStatus("")}>Все</button>
@@ -579,6 +609,33 @@ function OrdersView(props: {
             </tr>
           ))}</tbody>
         </table>
+
+        <div className="admin-order-cards-mobile">
+          {props.orders.map((order) => (
+            <button
+              key={order.id}
+              type="button"
+              className={`admin-mobile-order-card ${order.status === "NEW" ? "is-new" : ""}`}
+              onClick={() => props.onOpen(order.id)}
+            >
+              <div className="admin-mobile-order-header">
+                <b>{order.orderNumber}</b>
+                <em className="admin-status" data-status={order.status}>{statusLabels[order.status]}</em>
+              </div>
+              <div className="admin-mobile-order-body">
+                <div className="admin-mobile-order-info">
+                  <strong>{order.customerName}</strong>
+                  <small>+{order.customerPhone} · {order.fulfillmentMethod === "DELIVERY" ? "Доставка" : "Самовывоз"}</small>
+                </div>
+                <div className="admin-mobile-order-price">
+                  <strong>{money(order.total)}</strong>
+                  <small>{timeAgo(order.createdAt)}</small>
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
+
         {!props.orders.length && <p className="admin-empty">По выбранным условиям заказов нет.</p>}
       </div>
       <footer className="admin-pagination"><button type="button" disabled={props.pagination.page <= 1} onClick={() => props.onPage(props.pagination.page - 1)}>← Назад</button><span>Страница {props.pagination.page} из {props.pagination.pages}</span><button type="button" disabled={props.pagination.page >= props.pagination.pages} onClick={() => props.onPage(props.pagination.page + 1)}>Далее →</button></footer>
