@@ -4,6 +4,15 @@ import sharp, { type OverlayOptions } from "sharp";
 
 type PrintView = "front" | "back" | "sleeve_left" | "sleeve_right";
 
+export interface TextPrintSpec {
+  content: string;
+  fontFamily?: string;
+  fontWeight?: string | number;
+  fontStyle?: string;
+  color?: string;
+  outlined?: boolean;
+}
+
 const colorKeysByLabel: Record<string, string> = {
   "Белый": "white", "Натуральный": "natural", "Чёрный": "black", "Хаки / Олива": "khaki", "Меланж": "grey",
   "Тёмно-серый": "darkgrey", "Тёмно-синий": "navy", "Синий": "blue", "Красный": "red", "Бордовый": "burgundy", "Зелёный": "green", "Песочный": "sand",
@@ -17,6 +26,15 @@ const printZones: Record<string, Partial<Record<PrintView, { canvas: number; x: 
   bag: { front: { canvas: 747.844, x: 248.391, y: 355.226, width: 251, height: 299 }, back: { canvas: 747.844, x: 248.391, y: 355.226, width: 251, height: 299 } },
 };
 
+function escapeXml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
 function resolveMockupFilePath(productSlug: string, color: string, view: PrintView): string | null {
   const folder = productSlug === "shirt" ? "tshirt" : productSlug;
   const viewSlug = view === "back" ? "back" : view === "sleeve_left" ? "sleeve-left" : view === "sleeve_right" ? "sleeve-right" : "front";
@@ -27,15 +45,16 @@ function resolveMockupFilePath(productSlug: string, color: string, view: PrintVi
 
 /**
  * Server-side composite mockup generator matching the Admin Panel preview design.
- * Draws the base garment image + red dashed print zone boundary + artwork image.
+ * Draws the base garment image + red dashed print zone boundary + artwork image AND/OR text elements.
  */
 export async function generateServerMockupBuffer(args: {
   productSlug: string;
   colorLabelOrKey: string;
   view: PrintView;
   artworkBuffer?: Buffer | null;
+  textElements?: readonly TextPrintSpec[] | null;
 }): Promise<Buffer | null> {
-  const { productSlug, colorLabelOrKey, view, artworkBuffer } = args;
+  const { productSlug, colorLabelOrKey, view, artworkBuffer, textElements } = args;
   const mockupPath = resolveMockupFilePath(productSlug, colorLabelOrKey, view);
   if (!mockupPath) return null;
 
@@ -75,15 +94,35 @@ export async function generateServerMockupBuffer(args: {
         }
       }
 
-      // 2. Draw red dashed print zone border SVG matching admin panel
-      const svgBoundary = Buffer.from(
+      // 2. Render text elements inside print zone box if present
+      let svgTextNodes = "";
+      if (textElements && textElements.length > 0) {
+        svgTextNodes = textElements.map((spec, i) => {
+          const family = spec.fontFamily || "Inter";
+          const weight = spec.fontWeight || 700;
+          const style = spec.fontStyle || "normal";
+          const fill = spec.color || "#d71920";
+          const fontSize = Math.min(34, Math.max(16, Math.round(zw / (spec.content.length * 0.75))));
+          const textY = Math.round(zy + zh / 2 + (i - (textElements.length - 1) / 2) * (fontSize * 1.25));
+          const textX = Math.round(zx + zw / 2);
+
+          return `<text x="${textX}" y="${textY}" text-anchor="middle" dominant-baseline="middle" font-family="${escapeXml(family)}, sans-serif" font-weight="${weight}" font-style="${style}" font-size="${fontSize}px" fill="${fill}">${escapeXml(spec.content)}</text>`;
+        }).join("\n");
+      }
+
+      // 3. Draw red dashed print zone border SVG + text nodes
+      const svgOverlay = Buffer.from(
         `<svg width="${width}" height="${height}">
+          <style>
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@700;800&amp;family=Montserrat:wght@700;800&amp;family=Roboto:wght@700&amp;display=swap');
+          </style>
           <rect x="${zx}" y="${zy}" width="${zw}" height="${zh}" fill="none" stroke="#e02424" stroke-width="2" stroke-dasharray="6,4" />
+          ${svgTextNodes}
         </svg>`,
       );
 
       composites.push({
-        input: svgBoundary,
+        input: svgOverlay,
         left: 0,
         top: 0,
       });

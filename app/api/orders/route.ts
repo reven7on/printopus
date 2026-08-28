@@ -318,6 +318,7 @@ export async function POST(request: Request) {
         colorLabelOrKey: order.items[0]?.colorLabel ?? input.color,
         view,
         artworkBuffer: firstArtworkBuffer,
+        textElements,
       }).catch(() => null);
 
       if (serverMockup) {

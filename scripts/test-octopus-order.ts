@@ -33,7 +33,7 @@ async function runScenario1_OnlyOctopusImage() {
   const colorOption = product.options.find((o) => o.type === ProductOptionType.COLOR && o.value === "black") ?? product.options[0];
   const sizeOption = product.options.find((o) => o.type === ProductOptionType.SIZE && o.value === "l") ?? product.options[1];
 
-  const orderNumber = `BY-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-IMGONLY`;
+  const orderNumber = `BY-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-IMG-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
   const orderId = randomUUID();
   const orderItemId = randomUUID();
   const assetId = randomUUID();
@@ -133,7 +133,7 @@ async function runScenario2_OnlyText() {
   const colorOption = product.options.find((o) => o.type === ProductOptionType.COLOR && o.value === "white") ?? product.options[0];
   const sizeOption = product.options.find((o) => o.type === ProductOptionType.SIZE && o.value === "m") ?? product.options[1];
 
-  const orderNumber = `BY-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-TEXTONLY`;
+  const orderNumber = `BY-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-TXT-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
   const orderId = randomUUID();
   const orderItemId = randomUUID();
 
@@ -144,6 +144,7 @@ async function runScenario2_OnlyText() {
     colorLabelOrKey: colorOption.label,
     view: "front",
     artworkBuffer: null,
+    textElements: textSpecs,
   });
 
   const order = await db.order.create({
