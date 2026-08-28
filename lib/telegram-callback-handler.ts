@@ -21,12 +21,12 @@ const STATUS_NAMES: Record<string, string> = {
 };
 
 /**
- * Handles incoming Telegram inline button callback queries
+ * Handles incoming Telegram inline button callback queries safely and instantly
  */
 export async function handleTelegramCallbackQuery(query: TelegramCallbackQuery): Promise<boolean> {
   const { id: callbackId, data, message, from } = query;
   if (!data || !data.startsWith("st:") || !message) {
-    if (callbackId) await answerCallbackQuery(callbackId, "Неверный запрос");
+    if (callbackId) await answerCallbackQuery(callbackId, "Неверный запрос").catch(() => {});
     return false;
   }
 
@@ -35,11 +35,14 @@ export async function handleTelegramCallbackQuery(query: TelegramCallbackQuery):
   const orderId = parts[2];
 
   if (!Object.values(OrderStatus).includes(targetStatus) || !orderId) {
-    await answerCallbackQuery(callbackId, "Неизвестный статус");
+    await answerCallbackQuery(callbackId, "Неизвестный статус").catch(() => {});
     return false;
   }
 
   const readableStatus = STATUS_NAMES[targetStatus] ?? targetStatus;
+
+  // 1. Immediately acknowledge Telegram button click in <100ms so button never spins/freezes
+  await answerCallbackQuery(callbackId, `⏳ Обновляем статус: ${readableStatus}...`).catch(() => {});
 
   try {
     const existing = await database.order.findUnique({
@@ -48,12 +51,12 @@ export async function handleTelegramCallbackQuery(query: TelegramCallbackQuery):
     });
 
     if (!existing) {
-      await answerCallbackQuery(callbackId, "❌ Заказ не найден");
+      await answerCallbackQuery(callbackId, "❌ Заказ не найден в базе данных").catch(() => {});
       return false;
     }
 
     if (existing.status === targetStatus) {
-      await answerCallbackQuery(callbackId, `ℹ️ Заказ #${existing.orderNumber} уже в статусе "${readableStatus}"`);
+      await answerCallbackQuery(callbackId, `ℹ️ Заказ #${existing.orderNumber} уже в статусе "${readableStatus}"`).catch(() => {});
       return true;
     }
 
@@ -88,10 +91,10 @@ export async function handleTelegramCallbackQuery(query: TelegramCallbackQuery):
     });
 
     if (updatedOrder) {
-      // 1. Immediately acknowledge Telegram button click so the button never freezes
-      await answerCallbackQuery(callbackId, `✅ Заказ #${updatedOrder.orderNumber}: ${readableStatus}`);
+      // 2. Notify manager of successful status change toast
+      await answerCallbackQuery(callbackId, `✅ Заказ #${updatedOrder.orderNumber}: ${readableStatus}`).catch(() => {});
 
-      // 2. Update Telegram message text and buttons in live chat
+      // 3. Update message text and buttons in live Telegram chat
       await updateTelegramMessageStatus(message.chat.id, message.message_id, {
         id: updatedOrder.id,
         orderNumber: updatedOrder.orderNumber,
@@ -123,7 +126,7 @@ export async function handleTelegramCallbackQuery(query: TelegramCallbackQuery):
     }
   } catch (err) {
     console.error("[Telegram Handler] Error updating order status:", err);
-    await answerCallbackQuery(callbackId, "❌ Ошибка при обновлении статуса");
+    await answerCallbackQuery(callbackId, "❌ Ошибка при обновлении статуса").catch(() => {});
   }
 
   return false;
