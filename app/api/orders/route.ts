@@ -22,6 +22,7 @@ import {
 
 import { getClientIp, RateLimiter } from "../../../lib/rate-limiter";
 import { sendOrderNotificationToTelegram, sendTelegramDocument } from "../../../lib/telegram";
+import { generateServerMockupBuffer } from "../../../lib/server-mockup-generator";
 
 export const runtime = "nodejs";
 
@@ -298,6 +299,31 @@ export async function POST(request: Request) {
       });
     }
 
+    const placementLabels: Record<string, string> = {
+      center: "Спереди по центру",
+      chest_left: "Спереди слева",
+      back: "На спине",
+      sleeve_left: "На левом рукаве",
+      sleeve_right: "На правом рукаве",
+    };
+
+    let previewBuffers = parsedRequest.previewBuffers;
+    if (!previewBuffers || previewBuffers.length === 0) {
+      const view = input.placement === "back" ? "back" : input.placement === "sleeve_left" ? "sleeve_left" : input.placement === "sleeve_right" ? "sleeve_right" : "front";
+      const viewName = placementLabels[input.placement] ?? "Спереди по центру";
+      const firstArtworkBuffer = preparedAssets.length > 0 ? await readStoredAsset(preparedAssets[0].storageKey).catch(() => null) : null;
+      const serverMockup = await generateServerMockupBuffer({
+        productSlug: input.productSlug,
+        colorLabelOrKey: order.items[0]?.colorLabel ?? input.color,
+        view,
+        artworkBuffer: firstArtworkBuffer,
+      }).catch(() => null);
+
+      if (serverMockup) {
+        previewBuffers = [{ name: viewName, buffer: serverMockup }];
+      }
+    }
+
     sendOrderNotificationToTelegram({
       id: order.id,
       orderNumber: order.orderNumber,
@@ -311,7 +337,7 @@ export async function POST(request: Request) {
       discountPercent: Number(order.discountPercent),
       total: Number(order.total),
       status: order.status,
-      previewBuffers: parsedRequest.previewBuffers,
+      previewBuffers,
       items: order.items.map((item) => ({
         productName: item.productName,
         colorLabel: item.colorLabel,
@@ -326,15 +352,16 @@ export async function POST(request: Request) {
       })),
     })
       .then(async () => {
-        const placementPrefix = input.placement ?? "print";
+        const placementName = placementLabels[input.placement] ?? input.placement;
         for (const asset of preparedAssets) {
           try {
             const fileBuffer = await readStoredAsset(asset.storageKey);
-            const prefixedName = `${placementPrefix}_${asset.originalName}`;
+            const sanitizedPlacement = placementName.replace(/\s+/g, "_");
+            const prefixedName = `${sanitizedPlacement}_${asset.originalName}`;
             await sendTelegramDocument(
               fileBuffer,
               prefixedName,
-              `📁 Исходник принта (${placementPrefix}) к заказу #${order.orderNumber}`,
+              `📁 Исходник принта (${placementName}) к заказу #${order.orderNumber}`,
             );
           } catch (err) {
             console.error("[Telegram] Failed to send asset document:", err);

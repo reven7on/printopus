@@ -327,9 +327,10 @@ export async function sendTelegramDocument(
   try {
     const formData = new FormData();
     formData.append("chat_id", chatId);
+    formData.append("disable_content_type_detection", "true");
     formData.append(
       "document",
-      new Blob([new Uint8Array(documentBuffer)]),
+      new Blob([new Uint8Array(documentBuffer)], { type: "application/octet-stream" }),
       fileName,
     );
     if (caption) {
