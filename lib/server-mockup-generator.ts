@@ -4,14 +4,8 @@ import sharp, { type OverlayOptions } from "sharp";
 
 type PrintView = "front" | "back" | "sleeve_left" | "sleeve_right";
 
-export interface TextPrintSpec {
-  content: string;
-  fontFamily?: string;
-  fontWeight?: string | number;
-  fontStyle?: string;
-  color?: string;
-  outlined?: boolean;
-}
+import { type TextPrintSpec, type ShapePrintSpec } from "./text-asset-generator";
+import { GRAPHIC_SHAPES_SVG } from "./graphic-shapes";
 
 const colorKeysByLabel: Record<string, string> = {
   "Белый": "white", "Натуральный": "natural", "Чёрный": "black", "Хаки / Олива": "khaki", "Меланж": "grey",
@@ -43,9 +37,11 @@ function resolveMockupFilePath(productSlug: string, color: string, view: PrintVi
   return path.join(process.cwd(), "public", "mockups", "spreadshirt", folder, filename);
 }
 
+
+
 /**
  * Server-side composite mockup generator matching the Admin Panel preview design.
- * Draws the base garment image + red dashed print zone boundary + artwork image AND/OR text elements.
+ * Draws the base garment image + red dashed print zone boundary + artwork image AND/OR text/shape elements.
  */
 export async function generateServerMockupBuffer(args: {
   productSlug: string;
@@ -53,8 +49,9 @@ export async function generateServerMockupBuffer(args: {
   view: PrintView;
   artworkBuffer?: Buffer | null;
   textElements?: readonly TextPrintSpec[] | null;
+  shapeElements?: readonly ShapePrintSpec[] | null;
 }): Promise<Buffer | null> {
-  const { productSlug, colorLabelOrKey, view, artworkBuffer, textElements } = args;
+  const { productSlug, colorLabelOrKey, view, artworkBuffer, textElements, shapeElements } = args;
   const mockupPath = resolveMockupFilePath(productSlug, colorLabelOrKey, view);
   if (!mockupPath) return null;
 
@@ -110,13 +107,29 @@ export async function generateServerMockupBuffer(args: {
         }).join("\n");
       }
 
-      // 3. Draw red dashed print zone border SVG + text nodes
+      // 2. Render shape elements inside print zone box if present
+      let svgShapeNodes = "";
+      if (shapeElements && shapeElements.length > 0) {
+        svgShapeNodes = shapeElements.map((shape) => {
+          const shapeSvg = GRAPHIC_SHAPES_SVG[shape.content] ?? GRAPHIC_SHAPES_SVG.star;
+          const color = shape.color || "#eab308";
+          const shapeW = Math.round(zw * ((shape.width ?? 45) / 100));
+          const shapeH = shapeW;
+          const shapeX = Math.round(zx + zw * ((shape.x ?? 50) / 100) - shapeW / 2);
+          const shapeY = Math.round(zy + zh * ((shape.y ?? 50) / 100) - shapeH / 2);
+
+          return `<g transform="translate(${shapeX}, ${shapeY}) scale(${shapeW / 100})" fill="${color}">${shapeSvg}</g>`;
+        }).join("\n");
+      }
+
+      // 3. Draw red dashed print zone border SVG + text and shape nodes
       const svgOverlay = Buffer.from(
         `<svg width="${width}" height="${height}">
           <style>
             @import url('https://fonts.googleapis.com/css2?family=Inter:wght@700;800&amp;family=Montserrat:wght@700;800&amp;family=Roboto:wght@700&amp;display=swap');
           </style>
           <rect x="${zx}" y="${zy}" width="${zw}" height="${zh}" fill="none" stroke="#e02424" stroke-width="2" stroke-dasharray="6,4" />
+          ${svgShapeNodes}
           ${svgTextNodes}
         </svg>`,
       );

@@ -23,7 +23,7 @@ import {
 import { getClientIp, RateLimiter } from "../../../lib/rate-limiter";
 import { sendOrderNotificationToTelegram, sendTelegramDocument } from "../../../lib/telegram";
 import { generateServerMockupBuffer } from "../../../lib/server-mockup-generator";
-import { generateTransparentTextPngBuffer, generateTextSvg } from "../../../lib/text-asset-generator";
+import { generateTransparentGraphicsPngBuffer, generateVectorGraphicsSvg, type TextPrintSpec, type ShapePrintSpec } from "../../../lib/text-asset-generator";
 
 export const runtime = "nodejs";
 
@@ -283,17 +283,28 @@ export async function POST(request: Request) {
       });
     });
 
-    const textElements: Array<{ content: string; fontFamily?: string; color?: string }> = [];
+    const textElements: TextPrintSpec[] = [];
+    const shapeElements: ShapePrintSpec[] = [];
     if (input.design && typeof input.design === "object") {
       Object.values(input.design).forEach((viewElements) => {
         if (Array.isArray(viewElements)) {
           viewElements.forEach((el) => {
-            if (el && typeof el === "object" && el.type === "text" && typeof el.content === "string") {
-              textElements.push({
-                content: el.content,
-                fontFamily: typeof el.fontFamily === "string" ? el.fontFamily : undefined,
-                color: typeof el.color === "string" ? el.color : undefined,
-              });
+            if (el && typeof el === "object" && typeof el.content === "string") {
+              if (el.type === "text") {
+                textElements.push({
+                  content: el.content,
+                  fontFamily: typeof el.fontFamily === "string" ? el.fontFamily : undefined,
+                  color: typeof el.color === "string" ? el.color : undefined,
+                });
+              } else if (el.type === "shape") {
+                shapeElements.push({
+                  content: el.content,
+                  color: typeof el.color === "string" ? el.color : undefined,
+                  x: typeof el.x === "number" ? el.x : 50,
+                  y: typeof el.y === "number" ? el.y : 50,
+                  width: typeof el.width === "number" ? el.width : 35,
+                });
+              }
             }
           });
         }
@@ -319,6 +330,7 @@ export async function POST(request: Request) {
         view,
         artworkBuffer: firstArtworkBuffer,
         textElements,
+        shapeElements,
       }).catch(() => null);
 
       if (serverMockup) {
@@ -350,6 +362,7 @@ export async function POST(request: Request) {
         unitPrice: Number(item.unitPrice),
         total: Number(item.total),
         textElements,
+        shapeElements,
         assets: item.assets,
       })),
     })
@@ -372,26 +385,26 @@ export async function POST(request: Request) {
           }
         }
 
-        // 2. Send rendered transparent PNG (300 DPI) and vector SVG for text elements
-        if (textElements.length > 0) {
+        // 2. Send rendered transparent PNG (300 DPI) and vector SVG for text and shape elements
+        if (textElements.length > 0 || shapeElements.length > 0) {
           try {
-            const textPngBuffer = await generateTransparentTextPngBuffer(textElements);
-            if (textPngBuffer) {
+            const graphicsPngBuffer = await generateTransparentGraphicsPngBuffer(textElements, shapeElements);
+            if (graphicsPngBuffer) {
               await sendTelegramDocument(
-                textPngBuffer,
-                `text_print_transparent_300dpi.png`,
-                `📁 Исходник надписи на плёнку (PNG с прозрачным фоном 300 DPI) к заказу #${order.orderNumber}`,
+                graphicsPngBuffer,
+                `graphics_print_transparent_300dpi.png`,
+                `📁 Исходник надписи/графики на плёнку (PNG с прозрачным фоном 300 DPI) к заказу #${order.orderNumber}`,
               );
             }
 
-            const textSvg = generateTextSvg(textElements);
+            const graphicsSvg = generateVectorGraphicsSvg(textElements, shapeElements);
             await sendTelegramDocument(
-              Buffer.from(textSvg),
-              `text_print_vector.svg`,
-              `📁 Векторный файл надписи (SVG) к заказу #${order.orderNumber}`,
+              Buffer.from(graphicsSvg),
+              `graphics_print_vector.svg`,
+              `📁 Векторный файл надписи/графики (SVG) к заказу #${order.orderNumber}`,
             );
           } catch (textErr) {
-            console.error("[Telegram] Failed to send text print document:", textErr);
+            console.error("[Telegram] Failed to send graphics print document:", textErr);
           }
         }
       })

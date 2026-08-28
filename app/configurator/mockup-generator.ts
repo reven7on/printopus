@@ -1,3 +1,5 @@
+import { getGraphicShapeSvgString } from "../../lib/graphic-shapes";
+
 export interface MockupElement {
   type: "image" | "text" | "shape";
   content: string;
@@ -124,6 +126,19 @@ export async function generateMockupPreviewBlob(
 
         ctx.fillStyle = element.color || "#111111";
         ctx.fillText(element.content, 0, 0);
+      } else if (element.type === "shape" && element.content) {
+        try {
+          const svgString = getGraphicShapeSvgString(element.content, element.color || "#111111", 100);
+          const blob = new Blob([svgString], { type: "image/svg+xml" });
+          const url = URL.createObjectURL(blob);
+          const img = await loadImage(url);
+          URL.revokeObjectURL(url);
+          const renderW = zoneW * (element.width / 100) * element.scale;
+          const renderH = renderW / (element.aspectRatio || 1);
+          ctx.drawImage(img, -renderW / 2, -renderH / 2, renderW, renderH);
+        } catch (err) {
+          console.warn("[MockupGenerator] Failed to load shape element:", err);
+        }
       }
 
       ctx.restore();

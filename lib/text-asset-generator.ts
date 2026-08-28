@@ -1,4 +1,5 @@
 import sharp from "sharp";
+import { GRAPHIC_SHAPES_SVG } from "./graphic-shapes";
 
 export interface TextPrintSpec {
   content: string;
@@ -7,6 +8,14 @@ export interface TextPrintSpec {
   fontStyle?: string;
   color?: string;
   outlined?: boolean;
+}
+
+export interface ShapePrintSpec {
+  content: string; // shape ID e.g. "star", "heart", "crown"
+  color?: string;
+  x?: number;
+  y?: number;
+  width?: number;
 }
 
 function escapeXml(str: string): string {
@@ -29,9 +38,24 @@ function getContrastingOutlineColor(color?: string) {
 }
 
 /**
- * Generates a clean vector SVG file string for text elements.
+ * Generates a clean vector SVG file string for text and graphic shape elements.
  */
-export function generateTextSvg(textSpecs: readonly TextPrintSpec[], width = 2400, height = 800): string {
+export function generateVectorGraphicsSvg(
+  textSpecs: readonly TextPrintSpec[] = [],
+  shapeSpecs: readonly ShapePrintSpec[] = [],
+  width = 2400,
+  height = 1200,
+): string {
+  const shapeNodes = shapeSpecs.map((spec, i) => {
+    const shapeSvg = GRAPHIC_SHAPES_SVG[spec.content] ?? GRAPHIC_SHAPES_SVG.star;
+    const color = spec.color || "#111111";
+    const size = shapeSpecs.length === 1 ? 400 : Math.round(600 / shapeSpecs.length);
+    const xPos = Math.round(width / 2 - size / 2);
+    const yPos = Math.round(height / 2 - size / 2 + (i - (shapeSpecs.length - 1) / 2) * (size * 0.8));
+
+    return `<g transform="translate(${xPos}, ${yPos}) scale(${size / 100})" fill="${color}">${shapeSvg}</g>`;
+  }).join("\n    ");
+
   const textNodes = textSpecs.map((spec, i) => {
     const family = spec.fontFamily || "Inter";
     const weight = spec.fontWeight || 700;
@@ -50,18 +74,26 @@ export function generateTextSvg(textSpecs: readonly TextPrintSpec[], width = 240
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;800&amp;family=Montserrat:wght@500;700;800&amp;family=Roboto:wght@400;700&amp;display=swap');
   </style>
   <g>
+    ${shapeNodes}
     ${textNodes}
   </g>
 </svg>`;
 }
 
+export function generateTextSvg(textSpecs: readonly TextPrintSpec[], width = 2400, height = 800): string {
+  return generateVectorGraphicsSvg(textSpecs, [], width, height);
+}
+
 /**
- * Generates a high-resolution (300 DPI) transparent PNG buffer for printing text on DTF/Flex film.
+ * Generates a high-resolution (300 DPI) transparent PNG buffer for printing text and shapes on DTF/Flex film.
  */
-export async function generateTransparentTextPngBuffer(textSpecs: readonly TextPrintSpec[]): Promise<Buffer | null> {
-  if (!textSpecs || textSpecs.length === 0) return null;
+export async function generateTransparentGraphicsPngBuffer(
+  textSpecs: readonly TextPrintSpec[] = [],
+  shapeSpecs: readonly ShapePrintSpec[] = [],
+): Promise<Buffer | null> {
+  if ((!textSpecs || textSpecs.length === 0) && (!shapeSpecs || shapeSpecs.length === 0)) return null;
   try {
-    const svgString = generateTextSvg(textSpecs, 3000, 1000);
+    const svgString = generateVectorGraphicsSvg(textSpecs, shapeSpecs, 3000, 1200);
     return await sharp(Buffer.from(svgString))
       .png({ compressionLevel: 9 })
       .toBuffer();
@@ -69,4 +101,8 @@ export async function generateTransparentTextPngBuffer(textSpecs: readonly TextP
     console.error("[TextAssetGenerator] Failed to render transparent PNG:", err);
     return null;
   }
+}
+
+export async function generateTransparentTextPngBuffer(textSpecs: readonly TextPrintSpec[]): Promise<Buffer | null> {
+  return generateTransparentGraphicsPngBuffer(textSpecs, []);
 }

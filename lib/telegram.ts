@@ -31,6 +31,13 @@ export interface TelegramOrderPayload {
       color?: string;
       outlined?: boolean;
     }>;
+    shapeElements?: Array<{
+      content: string;
+      color?: string;
+      x?: number;
+      y?: number;
+      width?: number;
+    }>;
     assets?: Array<{
       id: string;
       originalName: string;
