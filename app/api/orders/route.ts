@@ -23,6 +23,7 @@ import {
 import { getClientIp, RateLimiter } from "../../../lib/rate-limiter";
 import { sendOrderNotificationToTelegram, sendTelegramDocument } from "../../../lib/telegram";
 import { generateServerMockupBuffer } from "../../../lib/server-mockup-generator";
+import { generateTransparentTextPngBuffer, generateTextSvg } from "../../../lib/text-asset-generator";
 
 export const runtime = "nodejs";
 
@@ -353,6 +354,8 @@ export async function POST(request: Request) {
     })
       .then(async () => {
         const placementName = placementLabels[input.placement] ?? input.placement;
+
+        // 1. Send uploaded original image assets as documents
         for (const asset of preparedAssets) {
           try {
             const fileBuffer = await readStoredAsset(asset.storageKey);
@@ -365,6 +368,29 @@ export async function POST(request: Request) {
             );
           } catch (err) {
             console.error("[Telegram] Failed to send asset document:", err);
+          }
+        }
+
+        // 2. Send rendered transparent PNG (300 DPI) and vector SVG for text elements
+        if (textElements.length > 0) {
+          try {
+            const textPngBuffer = await generateTransparentTextPngBuffer(textElements);
+            if (textPngBuffer) {
+              await sendTelegramDocument(
+                textPngBuffer,
+                `text_print_transparent_300dpi.png`,
+                `📁 Исходник надписи на плёнку (PNG с прозрачным фоном 300 DPI) к заказу #${order.orderNumber}`,
+              );
+            }
+
+            const textSvg = generateTextSvg(textElements);
+            await sendTelegramDocument(
+              Buffer.from(textSvg),
+              `text_print_vector.svg`,
+              `📁 Векторный файл надписи (SVG) к заказу #${order.orderNumber}`,
+            );
+          } catch (textErr) {
+            console.error("[Telegram] Failed to send text print document:", textErr);
           }
         }
       })

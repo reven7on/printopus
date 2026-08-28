@@ -7,12 +7,13 @@ import { PrismaClient, ContactMethod, FulfillmentMethod, OrderStatus, ProductOpt
 import { generateServerMockupBuffer } from "../lib/server-mockup-generator.ts";
 import { sendOrderNotificationToTelegram, sendTelegramDocument } from "../lib/telegram.ts";
 import { writeStoredAsset, createStorageKey } from "../lib/local-file-storage.ts";
+import { generateTransparentTextPngBuffer, generateTextSvg } from "../lib/text-asset-generator.ts";
 
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL! });
 const db = new PrismaClient({ adapter });
 
 async function main() {
-  console.log("🚀 Starting test order creation with user octopus logo...");
+  console.log("🚀 Starting test order creation with user octopus logo and text printing assets...");
 
   const logoPath = path.join(process.cwd(), "public", "test-octopus-logo.png");
   const logoBuffer = await readFile(logoPath);
@@ -61,20 +62,24 @@ async function main() {
   }
   console.log(`✅ Rendered server mockup preview with Sharp (${(mockupBuffer.length / 1024).toFixed(1)} KB)`);
 
+  const textSpecs = [
+    { content: "ПРИНТОПУС 2026", fontFamily: "Montserrat", fontWeight: 800, color: "#750033" },
+  ];
+
   // 3. Save order to Postgres Database
   const order = await db.order.create({
     data: {
       id: orderId,
       orderNumber,
-      customerName: "Иван (Тест с Логотипом)",
+      customerName: "Иван (Тест Логотип + Текст на плёнку)",
       customerPhone: "+375 (29) 777-88-99",
       contactMethod: ContactMethod.TELEGRAM,
       fulfillmentMethod: FulfillmentMethod.DELIVERY,
       deliveryAddress: "г. Минск, пр. Независимости 45, кв. 12",
-      comment: "Срочная печать логотипа с осьминогом спереди!",
-      subtotal: 35.0,
+      comment: "Печать логотипа осьминога и надписи 'ПРИНТОПУС 2026'!",
+      subtotal: 45.0,
       discountPercent: 0.0,
-      total: 35.0,
+      total: 45.0,
       status: OrderStatus.NEW,
       items: {
         create: {
@@ -87,19 +92,31 @@ async function main() {
           sizeLabel: sizeOption?.label ?? "M",
           placement: "center",
           quantity: 1,
-          baseUnitPrice: 35.0,
-          unitPrice: 35.0,
-          total: 35.0,
+          baseUnitPrice: 45.0,
+          unitPrice: 45.0,
+          total: 45.0,
           design: {
             front: [
               {
                 type: "image",
                 name: "octopus_logo.png",
                 x: 50,
-                y: 45,
+                y: 40,
                 scale: 1,
                 rotation: 0,
-                width: 70,
+                width: 65,
+              },
+              {
+                type: "text",
+                content: "ПРИНТОПУС 2026",
+                fontFamily: "Montserrat",
+                fontWeight: 800,
+                color: "#750033",
+                x: 50,
+                y: 75,
+                scale: 1,
+                rotation: 0,
+                width: 50,
               },
             ],
           },
@@ -144,12 +161,12 @@ async function main() {
   const tgResult = await sendOrderNotificationToTelegram({
     id: order.id,
     orderNumber: order.orderNumber,
-    customerName: "Иван (Тест с Логотипом)",
+    customerName: "Иван (Тест Логотип + Текст на плёнку)",
     customerPhone: "+375 (29) 777-88-99",
     contactMethod: "telegram",
     fulfillmentMethod: "delivery",
     deliveryAddress: "г. Минск, пр. Независимости 45, кв. 12",
-    comment: "Срочная печать логотипа с осьминогом спереди!",
+    comment: "Печать логотипа осьминога и надписи 'ПРИНТОПУС 2026'!",
     subtotal: Number(order.subtotal),
     discountPercent: Number(order.discountPercent),
     total: Number(order.total),
@@ -167,9 +184,10 @@ async function main() {
         sizeLabel: sizeOption?.label ?? "M",
         placement: "center",
         quantity: 1,
-        baseUnitPrice: 35.0,
-        unitPrice: 35.0,
-        total: 35.0,
+        baseUnitPrice: 45.0,
+        unitPrice: 45.0,
+        total: 45.0,
+        textElements: textSpecs,
         assets: order.items[0].assets,
       },
     ],
@@ -177,15 +195,35 @@ async function main() {
 
   console.log(`✅ Telegram Notification Sent: ${tgResult}`);
 
-  // 5. Send Attached Original Document File (octopus_logo.png) to Telegram
+  // 5. Send Attached Original Image File (octopus_logo.png) to Telegram
   const docResult = await sendTelegramDocument(
     logoBuffer,
     "Спереди_по_центру_octopus_logo.png",
     `📁 Исходник принта (Спереди по центру) к заказу #${order.orderNumber}`,
   );
+  console.log(`✅ Telegram Image Document Sent: ${docResult}`);
 
-  console.log(`✅ Telegram Document Sent: ${docResult}`);
-  console.log("\n🎉 TEST ORDER SUCCESSFULLY EXECUTED!");
+  // 6. Send Rendered Transparent PNG (300 DPI) for text printing on film
+  const textPngBuffer = await generateTransparentTextPngBuffer(textSpecs);
+  if (textPngBuffer) {
+    const textPngResult = await sendTelegramDocument(
+      textPngBuffer,
+      `text_print_transparent_300dpi.png`,
+      `📁 Исходник надписи на плёнку (PNG с прозрачным фоном 300 DPI) к заказу #${order.orderNumber}`,
+    );
+    console.log(`✅ Telegram Transparent Text PNG Sent: ${textPngResult}`);
+  }
+
+  // 7. Send Vector SVG for text plotter cutting
+  const textSvg = generateTextSvg(textSpecs);
+  const textSvgResult = await sendTelegramDocument(
+    Buffer.from(textSvg),
+    `text_print_vector.svg`,
+    `📁 Векторный файл надписи (SVG) к заказу #${order.orderNumber}`,
+  );
+  console.log(`✅ Telegram Vector Text SVG Sent: ${textSvgResult}`);
+
+  console.log("\n🎉 ALL PRINT ASSETS (MOCKUP + ORIGINAL LOGO + TRANSPARENT TEXT PNG + VECTOR SVG) SUCCESSFULLY SENT!");
 }
 
 main()
