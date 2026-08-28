@@ -283,21 +283,47 @@ export async function POST(request: Request) {
       });
     });
 
-    const textElements: TextPrintSpec[] = [];
-    const shapeElements: ShapePrintSpec[] = [];
+    const viewMeta: Record<string, { label: string; filePrefix: string }> = {
+      front: { label: "Спереди", filePrefix: "1_Спереди" },
+      back: { label: "На спине", filePrefix: "2_Спина" },
+      sleeve_left: { label: "Левый рукав", filePrefix: "3_Левый_рукав" },
+      sleeve_right: { label: "Правый рукав", filePrefix: "4_Правый_рукав" },
+    };
+
+    interface ViewDesignGroup {
+      viewKey: "front" | "back" | "sleeve_left" | "sleeve_right";
+      label: string;
+      filePrefix: string;
+      textElements: TextPrintSpec[];
+      shapeElements: ShapePrintSpec[];
+      imageAssets: typeof preparedAssets;
+    }
+
+    const viewGroupsMap = new Map<string, ViewDesignGroup>();
+
     if (input.design && typeof input.design === "object") {
-      Object.values(input.design).forEach((viewElements) => {
-        if (Array.isArray(viewElements)) {
+      Object.entries(input.design).forEach(([viewKey, viewElements]) => {
+        if (Array.isArray(viewElements) && viewElements.length > 0) {
+          const meta = viewMeta[viewKey] ?? { label: viewKey, filePrefix: viewKey };
+          const group: ViewDesignGroup = {
+            viewKey: viewKey as any,
+            label: meta.label,
+            filePrefix: meta.filePrefix,
+            textElements: [],
+            shapeElements: [],
+            imageAssets: [],
+          };
+
           viewElements.forEach((el) => {
             if (el && typeof el === "object" && typeof el.content === "string") {
               if (el.type === "text") {
-                textElements.push({
+                group.textElements.push({
                   content: el.content,
                   fontFamily: typeof el.fontFamily === "string" ? el.fontFamily : undefined,
                   color: typeof el.color === "string" ? el.color : undefined,
                 });
               } else if (el.type === "shape") {
-                shapeElements.push({
+                group.shapeElements.push({
                   content: el.content,
                   color: typeof el.color === "string" ? el.color : undefined,
                   x: typeof el.x === "number" ? el.x : 50,
@@ -307,34 +333,55 @@ export async function POST(request: Request) {
               }
             }
           });
+
+          viewGroupsMap.set(viewKey, group);
         }
       });
     }
 
-    const placementLabels: Record<string, string> = {
-      center: "Спереди по центру",
-      chest_left: "Спереди слева",
-      back: "На спине",
-      sleeve_left: "На левом рукаве",
-      sleeve_right: "На правом рукаве",
-    };
+    if (viewGroupsMap.size === 0) {
+      const defaultView = input.placement === "back" ? "back" : input.placement === "sleeve_left" ? "sleeve_left" : input.placement === "sleeve_right" ? "sleeve_right" : "front";
+      const meta = viewMeta[defaultView] ?? { label: "Спереди", filePrefix: "1_Спереди" };
+      viewGroupsMap.set(defaultView, {
+        viewKey: defaultView as any,
+        label: meta.label,
+        filePrefix: meta.filePrefix,
+        textElements: [],
+        shapeElements: [],
+        imageAssets: preparedAssets,
+      });
+    } else {
+      const firstGroup = Array.from(viewGroupsMap.values())[0];
+      firstGroup.imageAssets = preparedAssets;
+    }
+
+    const allTextElements: TextPrintSpec[] = [];
+    const allShapeElements: ShapePrintSpec[] = [];
+    viewGroupsMap.forEach((g) => {
+      allTextElements.push(...g.textElements);
+      allShapeElements.push(...g.shapeElements);
+    });
 
     let previewBuffers = parsedRequest.previewBuffers;
     if (!previewBuffers || previewBuffers.length === 0) {
-      const view = input.placement === "back" ? "back" : input.placement === "sleeve_left" ? "sleeve_left" : input.placement === "sleeve_right" ? "sleeve_right" : "front";
-      const viewName = placementLabels[input.placement] ?? "Спереди по центру";
-      const firstArtworkBuffer = preparedAssets.length > 0 ? await readStoredAsset(preparedAssets[0].storageKey).catch(() => null) : null;
-      const serverMockup = await generateServerMockupBuffer({
-        productSlug: input.productSlug,
-        colorLabelOrKey: order.items[0]?.colorLabel ?? input.color,
-        view,
-        artworkBuffer: firstArtworkBuffer,
-        textElements,
-        shapeElements,
-      }).catch(() => null);
+      previewBuffers = [];
+      for (const group of viewGroupsMap.values()) {
+        const firstArtworkBuffer = group.imageAssets.length > 0
+          ? await readStoredAsset(group.imageAssets[0].storageKey).catch(() => null)
+          : null;
 
-      if (serverMockup) {
-        previewBuffers = [{ name: viewName, buffer: serverMockup }];
+        const serverMockup = await generateServerMockupBuffer({
+          productSlug: input.productSlug,
+          colorLabelOrKey: order.items[0]?.colorLabel ?? input.color,
+          view: group.viewKey,
+          artworkBuffer: firstArtworkBuffer,
+          textElements: group.textElements,
+          shapeElements: group.shapeElements,
+        }).catch(() => null);
+
+        if (serverMockup) {
+          previewBuffers.push({ name: group.label, buffer: serverMockup });
+        }
       }
     }
 
@@ -361,50 +408,50 @@ export async function POST(request: Request) {
         baseUnitPrice: Number(item.baseUnitPrice),
         unitPrice: Number(item.unitPrice),
         total: Number(item.total),
-        textElements,
-        shapeElements,
+        textElements: allTextElements,
+        shapeElements: allShapeElements,
         assets: item.assets,
       })),
     })
       .then(async () => {
-        const placementName = placementLabels[input.placement] ?? input.placement;
-
-        // 1. Send uploaded original image assets as documents
-        for (const asset of preparedAssets) {
-          try {
-            const fileBuffer = await readStoredAsset(asset.storageKey);
-            const sanitizedPlacement = placementName.replace(/\s+/g, "_");
-            const prefixedName = `${sanitizedPlacement}_${asset.originalName}`;
-            await sendTelegramDocument(
-              fileBuffer,
-              prefixedName,
-              `📁 Исходник принта (${placementName}) к заказу #${order.orderNumber}`,
-            );
-          } catch (err) {
-            console.error("[Telegram] Failed to send asset document:", err);
-          }
-        }
-
-        // 2. Send rendered transparent PNG (300 DPI) and vector SVG for text and shape elements
-        if (textElements.length > 0 || shapeElements.length > 0) {
-          try {
-            const graphicsPngBuffer = await generateTransparentGraphicsPngBuffer(textElements, shapeElements);
-            if (graphicsPngBuffer) {
+        // Send document attachments view by view with structured prefixes
+        for (const group of viewGroupsMap.values()) {
+          // 1. Uploaded Image Files for this view
+          for (const asset of group.imageAssets) {
+            try {
+              const fileBuffer = await readStoredAsset(asset.storageKey);
+              const prefixedName = `${group.filePrefix}_${asset.originalName}`;
               await sendTelegramDocument(
-                graphicsPngBuffer,
-                `graphics_print_transparent_300dpi.png`,
-                `📁 Исходник надписи/графики на плёнку (PNG с прозрачным фоном 300 DPI) к заказу #${order.orderNumber}`,
+                fileBuffer,
+                prefixedName,
+                `📁 [${group.label}] Исходник картинки (${asset.originalName}) к заказу #${order.orderNumber}`,
               );
+            } catch (err) {
+              console.error("[Telegram] Failed to send asset document:", err);
             }
+          }
 
-            const graphicsSvg = generateVectorGraphicsSvg(textElements, shapeElements);
-            await sendTelegramDocument(
-              Buffer.from(graphicsSvg),
-              `graphics_print_vector.svg`,
-              `📁 Векторный файл надписи/графики (SVG) к заказу #${order.orderNumber}`,
-            );
-          } catch (textErr) {
-            console.error("[Telegram] Failed to send graphics print document:", textErr);
+          // 2. Rendered transparent PNG (300 DPI) and vector SVG for text/shapes for this view
+          if (group.textElements.length > 0 || group.shapeElements.length > 0) {
+            try {
+              const graphicsPngBuffer = await generateTransparentGraphicsPngBuffer(group.textElements, group.shapeElements);
+              if (graphicsPngBuffer) {
+                await sendTelegramDocument(
+                  graphicsPngBuffer,
+                  `${group.filePrefix}_nadpis_graphics_300dpi.png`,
+                  `📁 [${group.label}] Исходник надписи/графики (PNG с прозрачным фоном 300 DPI) к заказу #${order.orderNumber}`,
+                );
+              }
+
+              const graphicsSvg = generateVectorGraphicsSvg(group.textElements, group.shapeElements);
+              await sendTelegramDocument(
+                Buffer.from(graphicsSvg),
+                `${group.filePrefix}_nadpis_graphics_vector.svg`,
+                `📁 [${group.label}] Векторный файл надписи/графики (SVG) к заказу #${order.orderNumber}`,
+              );
+            } catch (textErr) {
+              console.error("[Telegram] Failed to send graphics print document:", textErr);
+            }
           }
         }
       })

@@ -12,9 +12,9 @@ import { generateTransparentGraphicsPngBuffer, generateVectorGraphicsSvg } from 
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL! });
 const db = new PrismaClient({ adapter });
 
-async function runScenario1_OnlyOctopusImage() {
+async function runScenario4_MultiViewOrder() {
   console.log("\n=======================================================");
-  console.log("📌 СЦЕНАРИЙ 1: Заказ ТОЛЬКО с картинкой осьминога (Без текста и фигур)");
+  console.log("📌 СЦЕНАРИЙ 4: МНОГОСТОРОННИЙ ЗАКАЗ (Спереди + Спина + Рукав)");
   console.log("=======================================================");
 
   const logoPath = path.join(process.cwd(), "public", "test-octopus-logo.png");
@@ -31,9 +31,9 @@ async function runScenario1_OnlyOctopusImage() {
   if (!printMethod || !printFormat) throw new Error("Print method/format missing.");
 
   const colorOption = product.options.find((o) => o.type === ProductOptionType.COLOR && o.value === "black") ?? product.options[0];
-  const sizeOption = product.options.find((o) => o.type === ProductOptionType.SIZE && o.value === "l") ?? product.options[1];
+  const sizeOption = product.options.find((o) => o.type === ProductOptionType.SIZE && o.value === "xl") ?? product.options[1];
 
-  const orderNumber = `BY-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-IMG-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+  const orderNumber = `BY-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-MULTI-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
   const orderId = randomUUID();
   const orderItemId = randomUUID();
   const assetId = randomUUID();
@@ -41,25 +41,56 @@ async function runScenario1_OnlyOctopusImage() {
 
   await writeStoredAsset(storageKey, logoBuffer);
 
-  const mockupBuffer = await generateServerMockupBuffer({
+  const frontText = [{ content: "OCTOPUS CREW", fontFamily: "Montserrat", fontWeight: 800, color: "#ffffff" }];
+  const backText = [{ content: "KING OF PRINT 2026", fontFamily: "Montserrat", fontWeight: 800, color: "#eab308" }];
+  const backShapes = [{ content: "crown", color: "#eab308", x: 50, y: 35, width: 40 }];
+  const sleeveShapes = [{ content: "flame", color: "#ef4444", x: 50, y: 50, width: 45 }];
+
+  // Generate multi-view mockups
+  const frontMockup = await generateServerMockupBuffer({
     productSlug: "shirt",
     colorLabelOrKey: colorOption.label,
     view: "front",
     artworkBuffer: logoBuffer,
+    textElements: frontText,
   });
+
+  const backMockup = await generateServerMockupBuffer({
+    productSlug: "shirt",
+    colorLabelOrKey: colorOption.label,
+    view: "back",
+    artworkBuffer: null,
+    textElements: backText,
+    shapeElements: backShapes,
+  });
+
+  const sleeveMockup = await generateServerMockupBuffer({
+    productSlug: "shirt",
+    colorLabelOrKey: colorOption.label,
+    view: "sleeve_right",
+    artworkBuffer: null,
+    shapeElements: sleeveShapes,
+  });
+
+  const previewBuffers = [
+    { name: "Спереди", buffer: frontMockup! },
+    { name: "На спине", buffer: backMockup! },
+    { name: "Правый рукав", buffer: sleeveMockup! },
+  ];
 
   const order = await db.order.create({
     data: {
       id: orderId,
       orderNumber,
-      customerName: "Мария (Только картинка)",
-      customerPhone: "+375 (29) 111-22-33",
+      customerName: "Дмитрий (Заказ с 3 сторон: Спереди, Спина, Рукав)",
+      customerPhone: "+375 (29) 999-00-11",
       contactMethod: ContactMethod.TELEGRAM,
-      fulfillmentMethod: FulfillmentMethod.PICKUP,
-      comment: "Печать ТОЛЬКО логотипа с осьминогом!",
-      subtotal: 35.0,
-      discountPercent: 0.0,
-      total: 35.0,
+      fulfillmentMethod: FulfillmentMethod.DELIVERY,
+      deliveryAddress: "г. Минск, пр. Независимости 100",
+      comment: "Многостороннее нанесение: спереди осьминог, на спине корона, на рукаве огонь!",
+      subtotal: 75.0,
+      discountPercent: 10.0,
+      total: 67.5,
       status: OrderStatus.NEW,
       items: {
         create: {
@@ -70,13 +101,23 @@ async function runScenario1_OnlyOctopusImage() {
           productName: product.name,
           colorLabel: colorOption.label,
           sizeLabel: sizeOption.label,
-          placement: "center",
+          placement: "multi",
           quantity: 1,
-          baseUnitPrice: 35.0,
-          unitPrice: 35.0,
-          total: 35.0,
+          baseUnitPrice: 75.0,
+          unitPrice: 67.5,
+          total: 67.5,
           design: {
-            front: [{ type: "image", name: "octopus_logo.png", x: 50, y: 50, scale: 1, rotation: 0, width: 70 }],
+            front: [
+              { type: "image", name: "octopus_logo.png", x: 50, y: 40, scale: 1, rotation: 0, width: 60 },
+              { type: "text", content: "OCTOPUS CREW", fontFamily: "Montserrat", fontWeight: 800, color: "#ffffff", x: 50, y: 75, scale: 1, rotation: 0, width: 50 },
+            ],
+            back: [
+              { type: "shape", content: "crown", color: "#eab308", x: 50, y: 35, scale: 1, rotation: 0, width: 40 },
+              { type: "text", content: "KING OF PRINT 2026", fontFamily: "Montserrat", fontWeight: 800, color: "#eab308", x: 50, y: 70, scale: 1, rotation: 0, width: 55 },
+            ],
+            sleeve_right: [
+              { type: "shape", content: "flame", color: "#ef4444", x: 50, y: 50, scale: 1, rotation: 0, width: 45 },
+            ],
           },
           assets: {
             create: {
@@ -93,256 +134,61 @@ async function runScenario1_OnlyOctopusImage() {
     select: { id: true, orderNumber: true, status: true, subtotal: true, discountPercent: true, total: true, items: { select: { assets: true } } },
   });
 
-  console.log(`✅ [1/3] Сохранен заказ в БД: ${order.orderNumber}`);
+  console.log(`✅ [4/4] Сохранен многосторонний заказ в БД: ${order.orderNumber}`);
 
   await sendOrderNotificationToTelegram({
     id: order.id,
     orderNumber: order.orderNumber,
-    customerName: "Мария (Только картинка)",
-    customerPhone: "+375 (29) 111-22-33",
+    customerName: "Дмитрий (Заказ с 3 сторон: Спереди, Спина, Рукав)",
+    customerPhone: "+375 (29) 999-00-11",
     contactMethod: "telegram",
-    fulfillmentMethod: "pickup",
-    comment: "Печать ТОЛЬКО логотипа с осьминогом!",
-    subtotal: 35.0,
-    discountPercent: 0,
-    total: 35.0,
-    status: order.status,
-    previewBuffers: [{ name: "Спереди по центру", buffer: mockupBuffer! }],
-    items: [{ productName: "Футболка", colorLabel: colorOption.label, sizeLabel: sizeOption.label, placement: "center", quantity: 1, baseUnitPrice: 35.0, unitPrice: 35.0, total: 35.0, assets: order.items[0].assets }],
-  });
-
-  await sendTelegramDocument(logoBuffer, "Спереди_по_центру_octopus_logo.png", `📁 Исходник принта (Спереди по центру) к заказу #${order.orderNumber}`);
-  console.log(`✅ [1/3] Успешно отправлены превью футболки и исходник картинки осьминога!`);
-}
-
-async function runScenario2_OnlyText() {
-  console.log("\n=======================================================");
-  console.log("📌 СЦЕНАРИЙ 2: Заказ ТОЛЬКО с текстом (Без загруженных фото и фигур)");
-  console.log("=======================================================");
-
-  const product = await db.product.findFirst({
-    where: { slug: "shirt", active: true },
-    include: { options: true, printMethods: true },
-  });
-  if (!product) throw new Error("Product shirt not found.");
-
-  const printMethod = await db.printMethod.findFirst({ where: { slug: "dtf", active: true } });
-  const printFormat = await db.printFormat.findFirst({ where: { code: "A4", active: true } });
-  if (!printMethod || !printFormat) throw new Error("Print method/format missing.");
-
-  const colorOption = product.options.find((o) => o.type === ProductOptionType.COLOR && o.value === "white") ?? product.options[0];
-  const sizeOption = product.options.find((o) => o.type === ProductOptionType.SIZE && o.value === "m") ?? product.options[1];
-
-  const orderNumber = `BY-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-TXT-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
-  const orderId = randomUUID();
-  const orderItemId = randomUUID();
-
-  const textSpecs = [{ content: "СДЕЛАНО В МИНСКЕ 2026", fontFamily: "Montserrat", fontWeight: 800, color: "#d71920" }];
-
-  const mockupBuffer = await generateServerMockupBuffer({
-    productSlug: "shirt",
-    colorLabelOrKey: colorOption.label,
-    view: "front",
-    artworkBuffer: null,
-    textElements: textSpecs,
-  });
-
-  const order = await db.order.create({
-    data: {
-      id: orderId,
-      orderNumber,
-      customerName: "Алексей (Только надпись)",
-      customerPhone: "+375 (29) 444-55-66",
-      contactMethod: ContactMethod.PHONE,
-      fulfillmentMethod: FulfillmentMethod.DELIVERY,
-      deliveryAddress: "г. Минск, ул. Сурганова 12",
-      comment: "Клиент заказал только надпись 'СДЕЛАНО В МИНСКЕ 2026'",
-      subtotal: 30.0,
-      discountPercent: 0.0,
-      total: 30.0,
-      status: OrderStatus.NEW,
-      items: {
-        create: {
-          id: orderItemId,
-          productId: product.id,
-          printMethodId: printMethod.id,
-          printFormatId: printFormat.id,
-          productName: product.name,
-          colorLabel: colorOption.label,
-          sizeLabel: sizeOption.label,
-          placement: "center",
-          quantity: 1,
-          baseUnitPrice: 30.0,
-          unitPrice: 30.0,
-          total: 30.0,
-          design: {
-            front: [
-              {
-                type: "text",
-                content: "СДЕЛАНО В МИНСКЕ 2026",
-                fontFamily: "Montserrat",
-                fontWeight: 800,
-                color: "#d71920",
-                x: 50,
-                y: 50,
-                scale: 1,
-                rotation: 0,
-                width: 60,
-              },
-            ],
-          },
-        },
-      },
-    },
-    select: { id: true, orderNumber: true, status: true, subtotal: true, discountPercent: true, total: true },
-  });
-
-  console.log(`✅ [2/3] Сохранен заказ в БД: ${order.orderNumber}`);
-
-  await sendOrderNotificationToTelegram({
-    id: order.id,
-    orderNumber: order.orderNumber,
-    customerName: "Алексей (Только надпись)",
-    customerPhone: "+375 (29) 444-55-66",
-    contactMethod: "phone",
     fulfillmentMethod: "delivery",
-    deliveryAddress: "г. Минск, ул. Сурганова 12",
-    comment: "Клиент заказал только надпись 'СДЕЛАНО В МИНСКЕ 2026'",
-    subtotal: 30.0,
-    discountPercent: 0,
-    total: 30.0,
+    deliveryAddress: "г. Минск, пр. Независимости 100",
+    comment: "Многостороннее нанесение: спереди осьминог, на спине корона, на рукаве огонь!",
+    subtotal: 75.0,
+    discountPercent: 10.0,
+    total: 67.5,
     status: order.status,
-    previewBuffers: [{ name: "Спереди по центру", buffer: mockupBuffer! }],
-    items: [{ productName: "Футболка", colorLabel: colorOption.label, sizeLabel: sizeOption.label, placement: "center", quantity: 1, baseUnitPrice: 30.0, unitPrice: 30.0, total: 30.0, textElements: textSpecs, assets: [] }],
-  });
-
-  const textPngBuffer = await generateTransparentGraphicsPngBuffer(textSpecs, []);
-  if (textPngBuffer) {
-    await sendTelegramDocument(textPngBuffer, "text_print_transparent_300dpi.png", `📁 Исходник надписи на плёнку (PNG 300 DPI с прозрачным фоном) к заказу #${order.orderNumber}`);
-  }
-
-  const textSvg = generateVectorGraphicsSvg(textSpecs, []);
-  await sendTelegramDocument(Buffer.from(textSvg), "text_print_vector.svg", `📁 Векторный файл надписи (SVG) к заказу #${order.orderNumber}`);
-
-  console.log(`✅ [2/3] Успешно отправлены превью футболки и файлы надписи!`);
-}
-
-async function runScenario3_OnlyShapes() {
-  console.log("\n=======================================================");
-  console.log("📌 СЦЕНАРИЙ 3: Заказ ТОЛЬКО с векторной фигурой (КОРОНА И ЗВЕЗДА)");
-  console.log("=======================================================");
-
-  const product = await db.product.findFirst({
-    where: { slug: "shirt", active: true },
-    include: { options: true, printMethods: true },
-  });
-  if (!product) throw new Error("Product shirt not found.");
-
-  const printMethod = await db.printMethod.findFirst({ where: { slug: "dtf", active: true } });
-  const printFormat = await db.printFormat.findFirst({ where: { code: "A4", active: true } });
-  if (!printMethod || !printFormat) throw new Error("Print method/format missing.");
-
-  const colorOption = product.options.find((o) => o.type === ProductOptionType.COLOR && o.value === "black") ?? product.options[0];
-  const sizeOption = product.options.find((o) => o.type === ProductOptionType.SIZE && o.value === "l") ?? product.options[1];
-
-  const orderNumber = `BY-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-SHAPE-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
-  const orderId = randomUUID();
-  const orderItemId = randomUUID();
-
-  const shapeSpecs = [
-    { content: "crown", color: "#eab308", x: 50, y: 50, width: 45 },
-  ];
-
-  const mockupBuffer = await generateServerMockupBuffer({
-    productSlug: "shirt",
-    colorLabelOrKey: colorOption.label,
-    view: "front",
-    artworkBuffer: null,
-    shapeElements: shapeSpecs,
-  });
-
-  const order = await db.order.create({
-    data: {
-      id: orderId,
-      orderNumber,
-      customerName: "Елена (Графическая фигура Корона)",
-      customerPhone: "+375 (29) 888-99-00",
-      contactMethod: ContactMethod.TELEGRAM,
-      fulfillmentMethod: FulfillmentMethod.PICKUP,
-      comment: "Печать фигуры Золотая Корона из конструктора!",
-      subtotal: 30.0,
-      discountPercent: 0.0,
-      total: 30.0,
-      status: OrderStatus.NEW,
-      items: {
-        create: {
-          id: orderItemId,
-          productId: product.id,
-          printMethodId: printMethod.id,
-          printFormatId: printFormat.id,
-          productName: product.name,
-          colorLabel: colorOption.label,
-          sizeLabel: sizeOption.label,
-          placement: "center",
-          quantity: 1,
-          baseUnitPrice: 30.0,
-          unitPrice: 30.0,
-          total: 30.0,
-          design: {
-            front: [
-              {
-                type: "shape",
-                content: "crown",
-                name: "Корона",
-                color: "#eab308",
-                x: 50,
-                y: 50,
-                scale: 1,
-                rotation: 0,
-                width: 45,
-              },
-            ],
-          },
-        },
+    previewBuffers,
+    items: [
+      {
+        productName: "Футболка Oversize",
+        colorLabel: colorOption.label,
+        sizeLabel: sizeOption.label,
+        placement: "multi",
+        quantity: 1,
+        baseUnitPrice: 75.0,
+        unitPrice: 67.5,
+        total: 67.5,
+        textElements: [...frontText, ...backText],
+        shapeElements: [...backShapes, ...sleeveShapes],
+        assets: order.items[0].assets,
       },
-    },
-    select: { id: true, orderNumber: true, status: true, subtotal: true, discountPercent: true, total: true },
+    ],
   });
 
-  console.log(`✅ [3/3] Сохранен заказ с фигурой в БД: ${order.orderNumber}`);
+  // Dispatch view-structured document attachments
+  // 1_Спереди
+  await sendTelegramDocument(logoBuffer, "1_Спереди_octopus_logo.png", `📁 [Спереди] Исходник картинки (octopus_logo.png) к заказу #${order.orderNumber}`);
+  const frontPng = await generateTransparentGraphicsPngBuffer(frontText, []);
+  if (frontPng) await sendTelegramDocument(frontPng, "1_Спереди_nadpis_300dpi.png", `📁 [Спереди] Исходник надписи (PNG 300 DPI) к заказу #${order.orderNumber}`);
 
-  await sendOrderNotificationToTelegram({
-    id: order.id,
-    orderNumber: order.orderNumber,
-    customerName: "Елена (Графическая фигура Корона)",
-    customerPhone: "+375 (29) 888-99-00",
-    contactMethod: "telegram",
-    fulfillmentMethod: "pickup",
-    comment: "Печать фигуры Золотая Корона из конструктора!",
-    subtotal: 30.0,
-    discountPercent: 0,
-    total: 30.0,
-    status: order.status,
-    previewBuffers: [{ name: "Спереди по центру", buffer: mockupBuffer! }],
-    items: [{ productName: "Футболка", colorLabel: colorOption.label, sizeLabel: sizeOption.label, placement: "center", quantity: 1, baseUnitPrice: 30.0, unitPrice: 30.0, total: 30.0, shapeElements: shapeSpecs, assets: [] }],
-  });
+  // 2_Спина
+  const backPng = await generateTransparentGraphicsPngBuffer(backText, backShapes);
+  if (backPng) await sendTelegramDocument(backPng, "2_Спина_graphics_300dpi.png", `📁 [На спине] Исходник надписи/короны (PNG 300 DPI) к заказу #${order.orderNumber}`);
+  const backSvg = generateVectorGraphicsSvg(backText, backShapes);
+  await sendTelegramDocument(Buffer.from(backSvg), "2_Спина_graphics_vector.svg", `📁 [На спине] Векторный файл надписи/короны (SVG) к заказу #${order.orderNumber}`);
 
-  const shapePngBuffer = await generateTransparentGraphicsPngBuffer([], shapeSpecs);
-  if (shapePngBuffer) {
-    await sendTelegramDocument(shapePngBuffer, "shape_print_transparent_300dpi.png", `📁 Исходник фигуры на плёнку (PNG 300 DPI с прозрачным фоном) к заказу #${order.orderNumber}`);
-  }
+  // 4_Правый_рукав
+  const sleevePng = await generateTransparentGraphicsPngBuffer([], sleeveShapes);
+  if (sleevePng) await sendTelegramDocument(sleevePng, "4_Правый_рукав_graphics_300dpi.png", `📁 [Правый рукав] Исходник огня (PNG 300 DPI) к заказу #${order.orderNumber}`);
 
-  const shapeSvg = generateVectorGraphicsSvg([], shapeSpecs);
-  await sendTelegramDocument(Buffer.from(shapeSvg), "shape_print_vector.svg", `📁 Векторный файл фигуры (SVG) к заказу #${order.orderNumber}`);
-
-  console.log(`✅ [3/3] Успешно отправлены превью черной футболки с Короной и векторные файлы фигуры!`);
+  console.log(`✅ [4/4] Успешно отправлены превью со всех 3 сторон (Спереди, Спина, Рукав) и структурированные исходники!`);
 }
 
 async function main() {
-  await runScenario1_OnlyOctopusImage();
-  await runScenario2_OnlyText();
-  await runScenario3_OnlyShapes();
-  console.log("\n🎉 ВСЕ 3 ТЕСТОВЫХ СЦЕНАРИЯ (КАРТИНКА, ТЕКСТ И ВЕКТОРНАЯ ФИГУРА) УСПЕШНО ВЫПОЛНЕНЫ!");
+  await runScenario4_MultiViewOrder();
+  console.log("\n🎉 МНОГОСТОРОННИЙ ТЕСТОВЫЙ СЦЕНАРИЙ УСПЕШНО ВЫПОЛНЕН!");
 }
 
 main()
