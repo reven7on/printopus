@@ -59,8 +59,7 @@ test("formatOrderNotificationHtml formats complete order details", () => {
   assert(html.includes("Черный"));
   assert(html.includes("PRINTOPUS TEAM"));
   assert(html.includes("Montserrat"));
-  assert(html.includes("my_cool_print.png"));
-  assert(html.includes("2.00 MB"));
+  assert(html.includes("Исходники принта (1 ф.):"));
   assert(html.includes("90.00 BYN"));
 });
 

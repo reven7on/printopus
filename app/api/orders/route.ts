@@ -4,6 +4,7 @@ import { database } from "../../../lib/db";
 import {
   createStorageKey,
   ensureUploadCapacity,
+  readStoredAsset,
   removeStoredAsset,
   UploadStorageFullError,
   writeStoredAsset,
@@ -20,7 +21,7 @@ import {
 } from "../../../lib/upload-policy";
 
 import { getClientIp, RateLimiter } from "../../../lib/rate-limiter";
-import { sendOrderNotificationToTelegram } from "../../../lib/telegram";
+import { sendOrderNotificationToTelegram, sendTelegramDocument } from "../../../lib/telegram";
 
 export const runtime = "nodejs";
 
@@ -310,7 +311,22 @@ export async function POST(request: Request) {
         textElements,
         assets: item.assets,
       })),
-    }).catch((err) => console.error("Async Telegram notification error:", err));
+    })
+      .then(async () => {
+        for (const asset of preparedAssets) {
+          try {
+            const fileBuffer = await readStoredAsset(asset.storageKey);
+            await sendTelegramDocument(
+              fileBuffer,
+              asset.originalName,
+              `📁 Исходник принта к заказу #${order.orderNumber}`,
+            );
+          } catch (err) {
+            console.error("[Telegram] Failed to send asset document:", err);
+          }
+        }
+      })
+      .catch((err) => console.error("Async Telegram notification error:", err));
 
     const assetCount = order.items.reduce((total, item) => total + item.assets.length, 0);
     storedKeys.length = 0;

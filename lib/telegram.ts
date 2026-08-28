@@ -97,12 +97,7 @@ export function formatOrderNotificationHtml(order: TelegramOrderPayload): string
     }
 
     if (item.assets && item.assets.length > 0) {
-      html += `   • 📁 <b>Исходники принта (${item.assets.length}):</b>\n`;
-      item.assets.forEach((asset) => {
-        const sizeMb = (asset.sizeBytes / (1024 * 1024)).toFixed(2);
-        const downloadUrl = `${SITE_URL}/api/admin/assets/${asset.id}`;
-        html += `     - <a href="${downloadUrl}">${escapeTgHtml(asset.originalName)}</a> (${sizeMb} MB)\n`;
-      });
+      html += `   • 📁 <b>Исходники принта (${item.assets.length} ф.):</b> прикреплены отдельными файлами ниже ⬇️\n`;
     }
   });
 
@@ -284,5 +279,47 @@ export async function updateTelegramMessageStatus(
     });
   } catch (err) {
     console.error("[Telegram Bot] Failed to edit Telegram message:", err);
+  }
+}
+
+/**
+ * Send an attached document file (original print asset) to Telegram admin chat
+ */
+export async function sendTelegramDocument(
+  documentBuffer: Buffer | Uint8Array,
+  fileName: string,
+  caption?: string,
+): Promise<boolean> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = process.env.TELEGRAM_ADMIN_CHAT_ID;
+
+  if (!token || !chatId) return false;
+
+  try {
+    const formData = new FormData();
+    formData.append("chat_id", chatId);
+    formData.append(
+      "document",
+      new Blob([new Uint8Array(documentBuffer)]),
+      fileName,
+    );
+    if (caption) {
+      formData.append("caption", caption);
+    }
+
+    const response = await fetch(`https://api.telegram.org/bot${token}/sendDocument`, {
+      method: "POST",
+      body: formData,
+    });
+
+    const data = (await response.json()) as { ok: boolean; description?: string };
+    if (!data.ok) {
+      console.error("[Telegram Bot] Failed to send document:", data.description);
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.error("[Telegram Bot] Exception sending document:", error);
+    return false;
   }
 }
