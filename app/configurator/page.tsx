@@ -1375,18 +1375,22 @@ export default function Configurator() {
       formData.append("order", JSON.stringify(orderPayload));
       files.forEach((file) => formData.append("files", file, file.name));
 
-      if (currentPrintZone) {
-        try {
-          const previewBlob = await generateMockupPreviewBlob(
-            currentMockupImage,
-            currentPrintZone,
-            designs[viewAngle] ?? [],
-          );
-          if (previewBlob) {
-            formData.append("preview", previewBlob, "mockup_preview.png");
+      const allViews: ViewAngle[] = ["front", "back", "sleeve_left", "sleeve_right"];
+      for (const view of allViews) {
+        const elements = designs[view] ?? [];
+        if (elements.length > 0) {
+          const zone = printZones[item]?.[view];
+          const imgUrl = getMockupPath(item, selectedColor.id, view);
+          if (zone && imgUrl) {
+            try {
+              const blob = await generateMockupPreviewBlob(imgUrl, zone, elements);
+              if (blob) {
+                formData.append("previews", blob, `mockup_${view}.png`);
+              }
+            } catch (err) {
+              console.warn(`[Configurator] Could not generate preview for view ${view}:`, err);
+            }
           }
-        } catch (err) {
-          console.warn("[Configurator] Could not generate mockup preview:", err);
         }
       }
 

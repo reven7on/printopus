@@ -78,7 +78,15 @@ export async function generateMockupPreviewBlob(
     const zoneW = (printZone.width / printZone.canvas) * canvasSize;
     const zoneH = (printZone.height / printZone.canvas) * canvasSize;
 
-    // 3. Draw each element
+    // 3. Draw red dashed print zone boundary (matches Admin Panel preview)
+    ctx.save();
+    ctx.strokeStyle = "rgba(224, 36, 36, 0.8)";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 4]);
+    ctx.strokeRect(zoneX, zoneY, zoneW, zoneH);
+    ctx.restore();
+
+    // 4. Draw each element
     for (const element of elements) {
       ctx.save();
 

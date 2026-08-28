@@ -14,6 +14,7 @@ export interface TelegramOrderPayload {
   total: number;
   status: string;
   previewBuffer?: Buffer | Uint8Array | null;
+  previewBuffers?: Array<{ name?: string; buffer: Buffer | Uint8Array }>;
   items: Array<{
     productName: string;
     colorLabel?: string | null;
@@ -155,15 +156,21 @@ export async function sendOrderNotificationToTelegram(order: TelegramOrderPayloa
   const text = formatOrderNotificationHtml(order);
   const reply_markup = buildOrderInlineKeyboard(order.id, order.status);
 
-  // If preview image buffer is present, try sendPhoto first
-  if (order.previewBuffer && order.previewBuffer.length > 0) {
+  const photos = order.previewBuffers && order.previewBuffers.length > 0
+    ? order.previewBuffers
+    : order.previewBuffer && order.previewBuffer.length > 0
+      ? [{ name: "Макет нанесения", buffer: order.previewBuffer }]
+      : [];
+
+  if (photos.length > 0) {
     try {
+      const firstPhoto = photos[0];
       const formData = new FormData();
       formData.append("chat_id", chatId);
       formData.append(
         "photo",
-        new Blob([new Uint8Array(order.previewBuffer)], { type: "image/png" }),
-        `mockup_${order.orderNumber}.png`,
+        new Blob([new Uint8Array(firstPhoto.buffer)], { type: "image/png" }),
+        `mockup_${order.orderNumber}_0.png`,
       );
       formData.append("caption", text);
       formData.append("parse_mode", "HTML");
@@ -175,7 +182,29 @@ export async function sendOrderNotificationToTelegram(order: TelegramOrderPayloa
       });
 
       const data = (await response.json()) as { ok: boolean; description?: string };
-      if (data.ok) return true;
+      if (data.ok) {
+        for (let i = 1; i < photos.length; i++) {
+          const photo = photos[i];
+          try {
+            const extraFormData = new FormData();
+            extraFormData.append("chat_id", chatId);
+            extraFormData.append(
+              "photo",
+              new Blob([new Uint8Array(photo.buffer)], { type: "image/png" }),
+              `mockup_${order.orderNumber}_${i}.png`,
+            );
+            extraFormData.append("caption", `👕 <b>Макет (${escapeTgHtml(photo.name ?? `Вид ${i + 1}`)})</b> к заказу #${escapeTgHtml(order.orderNumber)}`);
+            extraFormData.append("parse_mode", "HTML");
+            await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, {
+              method: "POST",
+              body: extraFormData,
+            });
+          } catch (extraErr) {
+            console.warn("[Telegram Bot] Exception sending extra mockup photo:", extraErr);
+          }
+        }
+        return true;
+      }
       console.warn("[Telegram Bot] sendPhoto returned false, fallback to sendMessage:", data.description);
     } catch (err) {
       console.warn("[Telegram Bot] Exception sending photo preview, fallback to sendMessage:", err);

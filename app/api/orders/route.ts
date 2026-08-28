@@ -78,17 +78,30 @@ async function readOrderRequest(request: Request) {
       throw new UploadValidationError("Файлы переданы в неверном формате.");
     }
 
-    const previewEntry = formData.get("preview");
-    let previewBuffer: Buffer | undefined;
-    if (previewEntry && typeof previewEntry !== "string" && previewEntry.size > 0 && previewEntry.size < 5 * 1024 * 1024) {
-      try {
-        previewBuffer = Buffer.from(await previewEntry.arrayBuffer());
-      } catch {
-        // Ignore preview read error
+    const viewLabels: Record<string, string> = {
+      mockup_front: "Спереди по центру",
+      mockup_back: "На спине",
+      mockup_sleeve_left: "На левом рукаве",
+      mockup_sleeve_right: "На правом рукаве",
+    };
+
+    const previewEntries = [...formData.getAll("previews"), ...formData.getAll("preview")];
+    const previewBuffers: Array<{ name: string; buffer: Buffer }> = [];
+
+    for (const entry of previewEntries) {
+      if (entry && typeof entry !== "string" && entry.size > 0 && entry.size < 5 * 1024 * 1024) {
+        try {
+          const buf = Buffer.from(await entry.arrayBuffer());
+          const baseName = entry.name?.replace(/\.[^/.]+$/, "") ?? "";
+          const name = viewLabels[baseName] ?? "Макет нанесения";
+          previewBuffers.push({ name, buffer: buf });
+        } catch {
+          // Ignore preview read error
+        }
       }
     }
 
-    return { value, files: files as File[], previewBuffer };
+    return { value, files: files as File[], previewBuffers };
   }
 
   if (!contentType.startsWith("application/json")) {
@@ -298,7 +311,7 @@ export async function POST(request: Request) {
       discountPercent: Number(order.discountPercent),
       total: Number(order.total),
       status: order.status,
-      previewBuffer: parsedRequest.previewBuffer,
+      previewBuffers: parsedRequest.previewBuffers,
       items: order.items.map((item) => ({
         productName: item.productName,
         colorLabel: item.colorLabel,
@@ -313,13 +326,15 @@ export async function POST(request: Request) {
       })),
     })
       .then(async () => {
+        const placementPrefix = input.placement ?? "print";
         for (const asset of preparedAssets) {
           try {
             const fileBuffer = await readStoredAsset(asset.storageKey);
+            const prefixedName = `${placementPrefix}_${asset.originalName}`;
             await sendTelegramDocument(
               fileBuffer,
-              asset.originalName,
-              `📁 Исходник принта к заказу #${order.orderNumber}`,
+              prefixedName,
+              `📁 Исходник принта (${placementPrefix}) к заказу #${order.orderNumber}`,
             );
           } catch (err) {
             console.error("[Telegram] Failed to send asset document:", err);
