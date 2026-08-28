@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { randomUUID } from "node:crypto";
 import { PrismaPg } from "@prisma/adapter-pg";
-import { PrismaClient, ContactMethod, FulfillmentMethod, OrderStatus } from "../app/generated/prisma/client.js";
+import { PrismaClient, ContactMethod, FulfillmentMethod, OrderStatus } from "../app/generated/prisma/client";
 import { sendOrderNotificationToTelegram } from "../lib/telegram.ts";
 import { handleTelegramCallbackQuery } from "../lib/telegram-callback-handler.ts";
 
@@ -17,21 +17,21 @@ async function main() {
 
   if (!product || !printMethod || !printFormat) throw new Error("Catalog items missing.");
 
-  const orderNumber = `BY-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-BTN-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+  const orderNumber = `BY-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-REAL-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
   const orderId = randomUUID();
 
   const order = await db.order.create({
     data: {
       id: orderId,
       orderNumber,
-      customerName: "Тест Кнопок Telegram",
+      customerName: "Тест Кнопок Telegram (Реальный Заказ)",
       customerPhone: "+375 (29) 111-00-00",
       contactMethod: ContactMethod.TELEGRAM,
       fulfillmentMethod: FulfillmentMethod.DELIVERY,
-      comment: "Проверка кнопок Telegram бота [Принять в работу -> Готов -> Завершен]",
-      subtotal: 35.0,
+      comment: "Свежий заказ для проверки нажатия кнопок в Telegram!",
+      subtotal: 45.0,
       discountPercent: 0.0,
-      total: 35.0,
+      total: 45.0,
       status: OrderStatus.NEW,
       items: {
         create: {
@@ -43,67 +43,46 @@ async function main() {
           sizeLabel: "L",
           placement: "center",
           quantity: 1,
-          baseUnitPrice: 35.0,
-          unitPrice: 35.0,
-          total: 35.0,
+          baseUnitPrice: 45.0,
+          unitPrice: 45.0,
+          total: 45.0,
         },
       },
     },
     select: { id: true, orderNumber: true, status: true },
   });
 
-  console.log(`✅ Created test order: ${order.orderNumber} (Status: ${order.status})`);
+  console.log(`✅ Created order in DB: #${order.orderNumber} (ID: ${order.id})`);
 
   // Send Telegram notification
   await sendOrderNotificationToTelegram({
     id: order.id,
     orderNumber: order.orderNumber,
-    customerName: "Тест Кнопок Telegram",
+    customerName: "Тест Кнопок Telegram (Реальный Заказ)",
     customerPhone: "+375 (29) 111-00-00",
     contactMethod: "telegram",
     fulfillmentMethod: "delivery",
-    comment: "Проверка кнопок Telegram бота [Принять в работу -> Готов -> Завершен]",
-    subtotal: 35.0,
+    comment: "Свежий заказ для проверки нажатия кнопок в Telegram!",
+    subtotal: 45.0,
     discountPercent: 0,
-    total: 35.0,
+    total: 45.0,
     status: order.status,
     items: [
       {
-        productName: "Футболка",
+        productName: "Футболка Oversize",
         colorLabel: "Чёрный",
         sizeLabel: "L",
         placement: "center",
         quantity: 1,
-        baseUnitPrice: 35.0,
-        unitPrice: 35.0,
-        total: 35.0,
+        baseUnitPrice: 45.0,
+        unitPrice: 45.0,
+        total: 45.0,
       },
     ],
   });
-  console.log("✅ Sent order notification with interactive inline buttons to Telegram!");
 
-  // Simulate button click to transition from NEW -> IN_PRODUCTION
-  const handled = await handleTelegramCallbackQuery({
-    id: "test_callback_query_1",
-    data: `st:IN_PRODUCTION:${order.id}`,
-    message: {
-      message_id: 1,
-      chat: { id: process.env.TELEGRAM_ADMIN_CHAT_ID! },
-    },
-    from: { first_name: "Менеджер Тест", username: "manager_test" },
-  });
-
-  console.log(`✅ Handled button click st:IN_PRODUCTION: ${handled}`);
-
-  const updatedOrder = await db.order.findUnique({
-    where: { id: order.id },
-    select: { status: true, statusHistory: true },
-  });
-
-  console.log(`✅ Verified DB status after button click: ${updatedOrder?.status}`);
-  console.log(`✅ Verified OrderStatusHistory note: ${updatedOrder?.statusHistory[0]?.note}`);
-
-  console.log("\n🎉 BUTTON CLICK VERIFICATION TEST PASSED!");
+  console.log(`\n🎉 Свежий заказ #${order.orderNumber} успешно отправлен в Telegram!`);
+  console.log(`Нажмите кнопку [ ✅ Принять в работу ] в Telegram прямо сейчас!`);
 }
 
 main()

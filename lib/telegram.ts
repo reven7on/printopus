@@ -178,9 +178,10 @@ export async function sendOrderNotificationToTelegram(order: TelegramOrderPayloa
       }),
     });
 
-    const data = (await response.json()) as { ok: boolean; description?: string };
+    const data = (await response.json()) as { ok: boolean; result?: { message_id: number }; description?: string };
     if (data.ok) {
       messageSent = true;
+      console.log(`[Telegram Bot] Order #${order.orderNumber} main text notification sent (message_id: ${data.result?.message_id})`);
     } else {
       console.error("[Telegram Bot] Failed to send text notification:", data.description);
       return false;
