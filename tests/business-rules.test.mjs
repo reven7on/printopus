@@ -9,7 +9,19 @@ import {
   parseCreateOrderInput,
 } from "../lib/order-domain.ts";
 import { createAdminSessionToken, readAdminSessionToken } from "../lib/admin-session.ts";
+import { RateLimiter } from "../lib/rate-limiter.ts";
 import { GARMENT_COLOR_PRICES, getQuantityDiscount, PRINT_FORMATS, PRODUCT_BASE_PRICES } from "../app/pricing.ts";
+
+test("rate limiter enforces maximum requests per window", () => {
+  const limiter = new RateLimiter({ windowMs: 60_000, max: 3 });
+  assert.equal(limiter.check("ip-123", 1000).allowed, true);
+  assert.equal(limiter.check("ip-123", 2000).allowed, true);
+  assert.equal(limiter.check("ip-123", 3000).allowed, true);
+  assert.equal(limiter.check("ip-123", 4000).allowed, false);
+
+  assert.equal(limiter.check("ip-456", 4000).allowed, true);
+  assert.equal(limiter.check("ip-123", 62000).allowed, true);
+});
 
 test("volume discount boundaries match the public offer", () => {
   const cases = [

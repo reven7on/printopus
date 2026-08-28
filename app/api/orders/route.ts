@@ -19,8 +19,11 @@ import {
   UploadValidationError,
 } from "../../../lib/upload-policy";
 
+import { getClientIp, RateLimiter } from "../../../lib/rate-limiter";
+
 export const runtime = "nodejs";
 
+const orderRateLimiter = new RateLimiter({ windowMs: 15 * 60 * 1000, max: 5 });
 const MAX_REQUEST_BYTES = 256_000;
 const MAX_MULTIPART_REQUEST_BYTES = MAX_UPLOAD_TOTAL_BYTES + MAX_REQUEST_BYTES + 1_000_000;
 const placementsByProduct: Record<string, readonly string[]> = {
@@ -93,6 +96,16 @@ async function readOrderRequest(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const ip = getClientIp(request);
+  const rateLimit = orderRateLimiter.check(ip);
+  if (!rateLimit.allowed) {
+    return errorResponse(
+      "TOO_MANY_REQUESTS",
+      "Слишком много заказов. Пожалуйста, подождите несколько минут перед отправкой следующего заказа.",
+      429,
+    );
+  }
+
   const storedKeys: string[] = [];
   try {
     const parsedRequest = await readOrderRequest(request);
