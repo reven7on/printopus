@@ -19,17 +19,24 @@
     "db:deploy": "prisma migrate deploy",
     "db:bootstrap": "prisma migrate deploy && tsx prisma/bootstrap.ts",
     "db:seed": "prisma db seed",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "telegram:webhook:configure": "node scripts/configure-telegram-webhook.mjs",
+    "telegram:webhook:disable": "node scripts/disable-telegram-webhook.mjs",
+    "telegram:poll": "tsx scripts/telegram-bot-daemon.ts",
+    "telegram:test:multiview": "node scripts/send-telegram-multiview-test.mjs",
+    "release:images": "bash scripts/release-images.sh"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.9.1",
     "@prisma/client": "^7.9.1",
     "dotenv": "^17.4.2",
-    "next": "^16.3.2",
+    "next": "^16.3.3",
     "pg": "^8.23.0",
+    "prisma": "^7.9.1",
     "react": "19.2.6",
     "react-dom": "19.2.6",
-    "sharp": "^0.35.3"
+    "sharp": "^0.35.4",
+    "tsx": "^4.23.12"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "4.2.1",
@@ -38,15 +45,14 @@
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
     "eslint": "9.39.4",
-    "eslint-config-next": "^16.3.2",
-    "prisma": "^7.9.1",
+    "eslint-config-next": "^16.3.3",
     "tailwindcss": "4.2.1",
-    "tsx": "^4.23.12",
     "typescript": "5.9.3"
   },
   "type": "module",
   "displayName": "Принт Центр — печать на одежде",
   "overrides": {
-    "deepmerge-ts": "8.0.2"
+    "deepmerge-ts": "8.0.2",
+    "mysql2": "3.24.4"
   }
 }

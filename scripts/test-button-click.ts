@@ -3,7 +3,6 @@ import { randomUUID } from "node:crypto";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient, ContactMethod, FulfillmentMethod, OrderStatus } from "../app/generated/prisma/client";
 import { sendOrderNotificationToTelegram } from "../lib/telegram.ts";
-import { handleTelegramCallbackQuery } from "../lib/telegram-callback-handler.ts";
 
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL! });
 const db = new PrismaClient({ adapter });

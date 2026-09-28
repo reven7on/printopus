@@ -1,8 +1,15 @@
-{$SITE_DOMAIN} {
+{
+	# E-mail used by Caddy for ACME account notifications. Set ACME_EMAIL in edge.env.
+	email {$ACME_EMAIL}
+}
+
+(common) {
 	encode zstd gzip
 
 	request_body {
-		max_size 27MB
+		# The order endpoint accepts up to about 38.3 MB including source files,
+		# four previews and multipart overhead.
+		max_size 42MB
 	}
 
 	header {
@@ -12,6 +19,14 @@
 		X-Frame-Options "SAMEORIGIN"
 		Referrer-Policy "strict-origin-when-cross-origin"
 	}
+}
 
-	reverse_proxy app:3000
+{$STAGING_DOMAIN} {
+	import common
+	reverse_proxy printopus-staging-app:3000
+}
+
+{$PRODUCTION_DOMAIN} {
+	import common
+	reverse_proxy printopus-production-app:3000
 }

@@ -4,6 +4,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { GRAPHIC_SHAPES_SVG } from "../../../../../lib/graphic-shapes";
+import { formatBelarusianPhone, getPhoneHref } from "../../../../order-validation";
 
 type OrderStatus = "NEW" | "CONFIRMED" | "IN_PRODUCTION" | "READY" | "COMPLETED" | "CANCELLED";
 type PrintView = "front" | "back" | "sleeve_left" | "sleeve_right";
@@ -27,6 +28,7 @@ type Order = {
     productName: string;
     colorLabel: string | null;
     sizeLabel: string | null;
+    sizeBreakdown: Array<{ value: string; label: string; quantity: number }> | null;
     placement: string | null;
     quantity: number;
     unitPrice: number;
@@ -37,9 +39,10 @@ type Order = {
     colorValue: string | null;
     colorHex: string | null;
     design: unknown;
-    assets: Array<{ id: string; originalName: string; mimeType: string; sizeBytes: number; width: number | null; height: number | null }>;
+    assets: Array<{ id: string; designElementId: string | null; originalName: string; mimeType: string; sizeBytes: number; width: number | null; height: number | null }>;
   }>;
   statusHistory: Array<{ id: string; fromStatus: OrderStatus | null; toStatus: OrderStatus; note: string | null; changedBy: string; createdAt: string }>;
+  telegramDelivery: { status: "PENDING" | "PROCESSING" | "SENT" | "FAILED"; attempts: number; lastError: string | null; sentAt: string | null } | null;
 };
 
 const statusLabels: Record<OrderStatus, string> = {
@@ -113,28 +116,43 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+type PreviewElement = {
+  element: Record<string, unknown>;
+  artwork?: Order["items"][number]["assets"][number];
+};
+
 function getSavedPrintViews(item: Order["items"][number]): Array<{
   view: PrintView;
   placement: string;
-  artwork?: Order["items"][number]["assets"][number];
-  elements: Array<Record<string, unknown>>;
+  elements: PreviewElement[];
 }> {
   const views: PrintView[] = ["front", "back", "sleeve_left", "sleeve_right"];
   const design = isRecord(item.design) ? item.design : null;
-  let imageIndex = 0;
+  const linkedAssets = new Map(item.assets.flatMap((asset) => (
+    asset.designElementId ? [[asset.designElementId, asset] as const] : []
+  )));
+  const legacyAssets = item.assets.filter((asset) => !asset.designElementId);
+  let legacyImageIndex = 0;
 
   const savedViews = views.flatMap((view) => {
-    const elements = design && Array.isArray(design[view]) ? design[view].filter(isRecord) : [];
-    const imageCount = elements.filter((element) => element.type === "image").length;
-    const artwork = imageCount > 0 ? item.assets[imageIndex] : undefined;
-    imageIndex += imageCount;
+    const rawElements = design && Array.isArray(design[view]) ? design[view].filter(isRecord) : [];
+    const elements = rawElements.map((element): PreviewElement => {
+      if (element.type !== "image") return { element };
+      const designElementId = typeof element.uploadId === "string"
+        ? element.uploadId
+        : typeof element.id === "string" ? element.id : null;
+      const linkedArtwork = designElementId ? linkedAssets.get(designElementId) : undefined;
+      const artwork = linkedArtwork ?? legacyAssets[legacyImageIndex];
+      if (!linkedArtwork) legacyImageIndex += 1;
+      return { element, artwork };
+    });
 
     if (elements.length === 0) return [];
     const placement = view === "front"
       ? item.placement === "center" || item.placement === "chest_left" ? item.placement : "center"
       : view;
 
-    return [{ view, placement, artwork, elements }];
+    return [{ view, placement, elements }];
   });
 
   if (savedViews.length) return savedViews;
@@ -142,7 +160,22 @@ function getSavedPrintViews(item: Order["items"][number]): Array<{
   const placement = item.placement ?? "center";
   const view: PrintView = placement === "back" || placement === "sleeve_left" || placement === "sleeve_right" ? placement : "front";
   const fallbackArtwork = item.assets.find((asset) => asset.mimeType.startsWith("image/"));
-  return [{ view, placement, artwork: fallbackArtwork, elements: fallbackArtwork ? [{ type: "image" }] : [] }];
+  return [{
+    view,
+    placement,
+    elements: fallbackArtwork ? [{ element: { type: "image" }, artwork: fallbackArtwork }] : [],
+  }];
+}
+
+function safeDesignColor(value: string) {
+  return /^#[0-9a-f]{6}$/i.test(value) ? value.toLowerCase() : "#111111";
+}
+
+function graphicShapeDataUrl(shapeId: string, color: string) {
+  const safeColor = safeDesignColor(color);
+  const shapeSvg = GRAPHIC_SHAPES_SVG[shapeId] ?? GRAPHIC_SHAPES_SVG.star;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="${safeColor}" color="${safeColor}">${shapeSvg}</svg>`;
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
 }
 
 function AdminElementItem({
@@ -154,7 +187,7 @@ function AdminElementItem({
 }) {
   const type = String(element.type ?? "");
   const content = String(element.content ?? "");
-  const color = String(element.color ?? "#111111");
+  const color = safeDesignColor(String(element.color ?? "#111111"));
   const fontFamily = String(element.fontFamily ?? "Inter");
 
   if (type === "image" && artwork && artwork.mimeType.startsWith("image/")) {
@@ -192,7 +225,6 @@ function AdminElementItem({
   }
 
   if (type === "shape" && content) {
-    const shapeSvg = GRAPHIC_SHAPES_SVG[content] ?? GRAPHIC_SHAPES_SVG.star;
     return (
       <span
         style={{
@@ -204,10 +236,20 @@ function AdminElementItem({
           color,
           padding: "4px",
         }}
-        dangerouslySetInnerHTML={{
-          __html: `<svg viewBox="0 0 100 100" fill="${color}" style="width:75%;height:75%;display:block">${shapeSvg}</svg>`,
-        }}
-      />
+      >
+        <span
+          aria-hidden="true"
+          style={{
+            display: "block",
+            width: "75%",
+            height: "75%",
+            backgroundImage: `url("${graphicShapeDataUrl(content, color)}")`,
+            backgroundPosition: "center",
+            backgroundRepeat: "no-repeat",
+            backgroundSize: "contain",
+          }}
+        />
+      </span>
     );
   }
 
@@ -218,7 +260,7 @@ function OrderPrintPreviews({ item }: { item: Order["items"][number] }) {
   const previews = getSavedPrintViews(item);
   return (
     <div className="admin-print-preview-list">
-      {previews.map(({ view, placement, artwork, elements }) => {
+      {previews.map(({ view, placement, elements }) => {
         const mockup = getMockupPath(item, view);
         const label = placementLabels[placement] ?? placement;
         if (!mockup) return null;
@@ -233,11 +275,9 @@ function OrderPrintPreviews({ item }: { item: Order["items"][number] }) {
             >
               <span className="admin-print-zone-marker" style={getPrintZoneStyle(item.product?.slug, view)}>
                 {elements.length > 0 ? (
-                  elements.map((el, i) => (
-                    <AdminElementItem key={i} element={el} artwork={artwork} />
+                  elements.map(({ element, artwork }, i) => (
+                    <AdminElementItem key={i} element={element} artwork={artwork} />
                   ))
-                ) : artwork?.mimeType.startsWith("image/") ? (
-                  <i style={{ backgroundImage: `url(/api/admin/assets/${artwork.id}?preview=1)` }} aria-hidden="true" />
                 ) : (
                   <span style={{ fontSize: "10px", color: "#666" }}>Зона печати</span>
                 )}
@@ -318,14 +358,16 @@ export default function OrderDetail({ orderId }: { orderId: string }) {
     setSaving(true);
     setError("");
     try {
-      await api(`/api/admin/orders/${order.id}`, {
+      const result = await api<{ telegramSync?: "not_linked" | "synced" | "failed" }>(`/api/admin/orders/${order.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: pendingStatus, note }),
       });
       await loadOrder();
       setPendingStatus(null);
-      setNotice("Статус заказа обновлён.");
+      setNotice(result.telegramSync === "failed"
+        ? "Статус обновлён, но сообщение в Telegram не синхронизировалось. Проверьте подключение бота."
+        : "Статус заказа обновлён.");
     } catch (reason) {
       if (reason instanceof Error && reason.message === "Сессия завершена.") {
         router.replace("/admin/login");
@@ -337,12 +379,33 @@ export default function OrderDetail({ orderId }: { orderId: string }) {
     }
   }
 
+  async function retryTelegramDelivery() {
+    if (!order) return;
+    setSaving(true);
+    setError("");
+    try {
+      await api(`/api/admin/orders/${order.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "retryTelegram" }),
+      });
+      await loadOrder();
+      setNotice("Уведомление поставлено в очередь повторно.");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось повторить уведомление.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   if (!order) return <main className="admin-order-page"><p className="admin-loading">{error || "Загружаем заказ…"}</p></main>;
 
   const currentIndex = workflow.indexOf(order.status);
   const proposedIndex = pendingStatus ? workflow.indexOf(pendingStatus) : -1;
   const nextStatus = currentIndex >= 0 ? workflow[currentIndex + 1] : undefined;
   const requiresReason = pendingStatus === "CANCELLED" || order.status === "CANCELLED" || (proposedIndex >= 0 && currentIndex >= 0 && proposedIndex < currentIndex);
+  const formattedCustomerPhone = formatBelarusianPhone(order.customerPhone);
+  const customerPhoneHref = getPhoneHref(order.customerPhone);
 
   return (
     <main className="admin-order-page">
@@ -353,7 +416,7 @@ export default function OrderDetail({ orderId }: { orderId: string }) {
           <p>{dateTime(order.createdAt)}</p>
         </div>
         <div className="admin-order-header-actions">
-          <a className="admin-secondary-action" href={`tel:+${order.customerPhone}`}>Позвонить</a>
+          <a className="admin-secondary-action" href={customerPhoneHref}>Позвонить</a>
           <button type="button" className="admin-primary-action" onClick={() => setPendingStatus(nextStatus ?? order.status)} disabled={!nextStatus}>{nextStatus ? nextAction[order.status] : "Статус завершён"}</button>
         </div>
       </header>
@@ -367,7 +430,7 @@ export default function OrderDetail({ orderId }: { orderId: string }) {
           <div className="admin-order-item-list">
             {order.items.map((item) => <article key={item.id} className="admin-order-item">
               <div className="admin-order-item-main"><OrderPrintPreviews item={item} /><div className="admin-order-item-details"><div className="admin-item-title"><h3>{item.productName}</h3><b>× {item.quantity}</b></div>
-                <dl><div><dt>Цвет</dt><dd>{item.colorLabel && <i className="admin-color-swatch" style={{ backgroundColor: item.colorHex ?? undefined }} aria-hidden="true" />}{item.colorLabel || "Не указан"}</dd></div><div><dt>Размер</dt><dd>{item.sizeLabel || "Не указан"}</dd></div><div><dt>Печать</dt><dd>{item.printMethod?.name || "Не указана"}</dd></div><div><dt>Формат</dt><dd>{item.printFormat ? `${item.printFormat.code} · ${item.printFormat.widthCm}×${item.printFormat.heightCm} см` : "Не указан"}</dd></div><div><dt>Расположение</dt><dd>{item.placement || "Не указано"}</dd></div></dl>
+                <dl><div><dt>Цвет</dt><dd>{item.colorLabel && <i className="admin-color-swatch" style={{ backgroundColor: item.colorHex ?? undefined }} aria-hidden="true" />}{item.colorLabel || "Не указан"}</dd></div><div><dt>{item.sizeBreakdown?.length ? "Размеры" : "Размер"}</dt><dd className="admin-size-breakdown">{item.sizeBreakdown?.length ? item.sizeBreakdown.map((entry) => <span key={entry.value}>{entry.label} — {entry.quantity}</span>) : item.sizeLabel || "Не указан"}</dd></div><div><dt>Печать</dt><dd>{item.printMethod?.name || "Не указана"}</dd></div><div><dt>Формат</dt><dd>{item.printFormat ? `${item.printFormat.code} · ${item.printFormat.widthCm}×${item.printFormat.heightCm} см` : "Не указан"}</dd></div><div><dt>Расположение</dt><dd>{item.placement ? placementLabels[item.placement] ?? item.placement : "Не указано"}</dd></div></dl>
                 {item.assets.length > 0 && <div className="admin-order-assets">{item.assets.map((asset) => <a key={asset.id} href={`/api/admin/assets/${asset.id}`} download>{asset.mimeType.startsWith("image/") && <i className="admin-asset-preview" style={{ backgroundImage: `url(/api/admin/assets/${asset.id}?preview=1)` }} aria-hidden="true" />}<span>Скачать макет</span><b>{asset.originalName}</b><small>{fileSize(asset.sizeBytes)}{asset.width && asset.height ? ` · ${asset.width}×${asset.height} px` : ""}</small></a>)}</div>}
               </div></div>
               <div className="admin-item-price"><small>{money(item.unitPrice)} / шт.</small><strong>{money(item.total)}</strong></div>
@@ -377,7 +440,7 @@ export default function OrderDetail({ orderId }: { orderId: string }) {
         </section>
 
         <aside className="admin-order-side">
-          <section className="admin-order-card admin-contact-card"><header><span className="admin-kicker">Клиент</span><h2>{order.customerName}</h2></header><a className="admin-contact-value" href={`tel:+${order.customerPhone}`}>+{order.customerPhone}</a><div className="admin-quick-actions"><a href={`tel:+${order.customerPhone}`}>Позвонить</a>{order.contactMethod === "TELEGRAM" && <a href={`https://t.me/+${order.customerPhone}`} target="_blank" rel="noreferrer">Telegram ↗</a>}<button type="button" onClick={() => void copy(`+${order.customerPhone}`, "Телефон скопирован")}>{copied === "Телефон скопирован" ? "Скопировано" : "Копировать телефон"}</button></div></section>
+          <section className="admin-order-card admin-contact-card"><header><span className="admin-kicker">Клиент</span><h2>{order.customerName}</h2></header><a className="admin-contact-value" href={customerPhoneHref}>{formattedCustomerPhone}</a>{order.contactMethod === "TELEGRAM" && <p>Клиент выбрал Telegram и должен первым написать менеджеру, указав номер заказа.</p>}{order.telegramDelivery && <p>Уведомление менеджеру: {order.telegramDelivery.status === "SENT" ? "доставлено" : order.telegramDelivery.status === "FAILED" ? `не доставлено после ${order.telegramDelivery.attempts} попыток` : `ожидает отправки (попыток: ${order.telegramDelivery.attempts})`}.</p>}<div className="admin-quick-actions"><a href={customerPhoneHref}>Позвонить</a><button type="button" onClick={() => void copy(formattedCustomerPhone, "Телефон скопирован")}>{copied === "Телефон скопирован" ? "Скопировано" : "Копировать телефон"}</button>{order.telegramDelivery?.status === "FAILED" && <button type="button" disabled={saving} onClick={() => void retryTelegramDelivery()}>Повторить Telegram</button>}</div></section>
           <section className="admin-order-card admin-fulfillment-card"><header><span className="admin-kicker">Получение</span><h2>{order.fulfillmentMethod === "DELIVERY" ? "Доставка" : "Самовывоз"}</h2></header><p>{order.fulfillmentMethod === "DELIVERY" ? order.deliveryAddress || "Адрес не указан" : "ул. Октябрьская, 16"}</p>{order.fulfillmentMethod === "DELIVERY" && <button type="button" className="admin-text-action" onClick={() => void copy(order.deliveryAddress || "", "Адрес скопирован")} disabled={!order.deliveryAddress}>{copied === "Адрес скопирован" ? "Скопировано" : "Копировать адрес"}</button>}</section>
           <section className="admin-order-card admin-total-card"><span className="admin-kicker">Расчёт стоимости</span><div><span>До скидки</span><b>{money(order.subtotal)}</b></div><div><span>Скидка</span><b>{order.discountPercent}%</b></div><div className="admin-total-result"><span>Итого</span><strong>{money(order.total)}</strong></div></section>
           <section className="admin-order-card admin-status-card">

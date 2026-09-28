@@ -22,6 +22,7 @@ export type PublicCatalog = {
       name: string;
       description: string | null;
       priceDelta: number;
+      recommendedFromQuantity: number | null;
       formats: Array<{
         code: string;
         widthCm: number;
@@ -35,11 +36,15 @@ export type PublicCatalog = {
 
 export type PublicCatalogStatus = "loading" | "ready" | "error";
 
-export function usePublicCatalog() {
+export function usePublicCatalog(initialCatalog?: PublicCatalog | null) {
   const [state, setState] = useState<{
     catalog: PublicCatalog | null;
     status: PublicCatalogStatus;
-  }>({ catalog: null, status: "loading" });
+  }>(() => initialCatalog === undefined
+    ? { catalog: null, status: "loading" }
+    : initialCatalog
+      ? { catalog: initialCatalog, status: "ready" }
+      : { catalog: null, status: "error" });
 
   useEffect(() => {
     let active = true;

@@ -1,15 +1,18 @@
 import type { MetadataRoute } from "next";
-import { SITE_URL } from "./site-config";
+import { getSiteUrl } from "./site-config";
+
+export const dynamic = "force-dynamic";
 
 export default function sitemap(): MetadataRoute.Sitemap {
+  const siteUrl = getSiteUrl();
   return [
     {
-      url: SITE_URL,
+      url: siteUrl,
       changeFrequency: "weekly",
       priority: 1,
     },
     {
-      url: `${SITE_URL}/configurator`,
+      url: `${siteUrl}/configurator`,
       changeFrequency: "monthly",
       priority: 0.8,
     },

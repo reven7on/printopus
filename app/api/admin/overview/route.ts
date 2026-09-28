@@ -4,6 +4,13 @@ import { database } from "../../../../lib/db";
 
 export const runtime = "nodejs";
 
+const activeOrderStatuses = [
+  OrderStatus.NEW,
+  OrderStatus.CONFIRMED,
+  OrderStatus.IN_PRODUCTION,
+  OrderStatus.READY,
+];
+
 export async function GET(request: Request) {
   const auth = await authorizeAdminRequest(request);
   if ("response" in auth) return auth.response;
@@ -12,7 +19,7 @@ export async function GET(request: Request) {
     const [statusGroups, revenue, recentOrders, auditLog, products] = await Promise.all([
       database.order.groupBy({ by: ["status"], _count: { _all: true } }),
       database.order.aggregate({
-        where: { status: { not: OrderStatus.CANCELLED } },
+        where: { status: { in: activeOrderStatuses } },
         _sum: { total: true },
         _count: { _all: true },
       }),

@@ -1,5 +1,6 @@
 import sharp from "sharp";
-import { GRAPHIC_SHAPES_SVG } from "./graphic-shapes";
+import { GRAPHIC_SHAPES_SVG } from "./graphic-shapes.ts";
+import { layoutTextGlyphs } from "./text-curve-layout.ts";
 
 export interface TextPrintSpec {
   content: string;
@@ -16,6 +17,32 @@ export interface ShapePrintSpec {
   x?: number;
   y?: number;
   width?: number;
+}
+
+export interface CombinedPrintElement {
+  id: string;
+  uploadId?: string;
+  type: "image" | "text" | "shape";
+  content?: string;
+  x: number;
+  y: number;
+  scale: number;
+  rotation: number;
+  width: number;
+  aspectRatio?: number;
+  color?: string;
+  fontFamily?: string;
+  fontWeight?: string | number;
+  fontStyle?: string;
+  letterSpacing?: number;
+  outlined?: boolean;
+  curve?: number;
+}
+
+export interface CombinedPrintAsset {
+  uploadId: string;
+  mimeType: string;
+  buffer: Buffer | Uint8Array;
 }
 
 function escapeXml(str: string): string {
@@ -35,6 +62,96 @@ function getContrastingOutlineColor(color?: string) {
   const blue = Number.parseInt(hex.slice(4, 6), 16);
   const luminance = (red * 0.299 + green * 0.587 + blue * 0.114) / 255;
   return luminance > 0.62 ? "#111111" : "#ffffff";
+}
+
+function finiteNumber(value: number | undefined, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function renderCombinedElement(
+  element: CombinedPrintElement,
+  canvasWidth: number,
+  canvasHeight: number,
+  assets: ReadonlyMap<string, CombinedPrintAsset>,
+): string {
+  const centerX = canvasWidth * (finiteNumber(element.x, 50) / 100);
+  const centerY = canvasHeight * (finiteNumber(element.y, 50) / 100);
+  const scale = finiteNumber(element.scale, 1);
+  const rotation = finiteNumber(element.rotation, 0);
+  const elementWidth = canvasWidth * (finiteNumber(element.width, 40) / 100) * scale;
+  const transform = `translate(${centerX} ${centerY}) rotate(${rotation})`;
+
+  if (element.type === "image" && element.uploadId) {
+    const asset = assets.get(element.uploadId);
+    if (!asset) return "";
+    const aspectRatio = Math.max(0.01, finiteNumber(element.aspectRatio, 1));
+    const elementHeight = elementWidth / aspectRatio;
+    const dataUrl = `data:${asset.mimeType};base64,${Buffer.from(asset.buffer).toString("base64")}`;
+    return `<g transform="${transform}"><image href="${dataUrl}" x="${-elementWidth / 2}" y="${-elementHeight / 2}" width="${elementWidth}" height="${elementHeight}" preserveAspectRatio="xMidYMid meet" /></g>`;
+  }
+
+  if (element.type === "shape" && element.content) {
+    const shapeSvg = GRAPHIC_SHAPES_SVG[element.content] ?? GRAPHIC_SHAPES_SVG.star;
+    const color = element.color || "#111111";
+    return `<g transform="${transform} translate(${-elementWidth / 2} ${-elementWidth / 2}) scale(${elementWidth / 100})" fill="${color}">${shapeSvg}</g>`;
+  }
+
+  if (element.type === "text" && element.content) {
+    const content = escapeXml(element.content);
+    const family = escapeXml(element.fontFamily || "Inter");
+    const weight = element.fontWeight || 700;
+    const style = element.fontStyle || "normal";
+    const fill = element.color || "#111111";
+    const baseFontAt600 = element.content.length > 17 ? 22 : element.content.length > 11 ? 28 : 34;
+    const fontSize = Math.max(24, baseFontAt600 * (canvasWidth / 600) * scale);
+    const letterSpacing = finiteNumber(element.letterSpacing, 0) * (canvasWidth / 600);
+    const stroke = element.outlined ? getContrastingOutlineColor(element.color) : "none";
+    const strokeWidth = element.outlined ? Math.max(2, fontSize * 0.08) : 0;
+    const common = `font-family="${family}, sans-serif" font-weight="${weight}" font-style="${style}" font-size="${fontSize}" letter-spacing="${letterSpacing}" fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}" stroke-linejoin="round" paint-order="stroke fill"`;
+    const curve = finiteNumber(element.curve, 0);
+    if (curve !== 0) {
+      const characters = Array.from(element.content);
+      const advances = characters.map((character) => (
+        (character.trim() ? fontSize * 0.6 : fontSize * 0.34) + letterSpacing
+      ));
+      const glyphs = layoutTextGlyphs({ content: element.content, pathWidth: elementWidth, curve, advances });
+      const glyphNodes = glyphs.map((glyph) => (
+        `<text transform="translate(${glyph.x} ${glyph.y}) rotate(${glyph.angle})" text-anchor="middle" dominant-baseline="middle" ${common}>${escapeXml(glyph.character)}</text>`
+      )).join("");
+      return `<g transform="${transform}">${glyphNodes}</g>`;
+    }
+    return `<g transform="${transform}"><text x="0" y="0" text-anchor="middle" dominant-baseline="middle" ${common}>${content}</text></g>`;
+  }
+
+  return "";
+}
+
+/**
+ * Flattens every image, text and vector shape for one print view into a single
+ * transparent PNG at the selected physical print size and 300 DPI.
+ */
+export async function generateCombinedPrintPngBuffer(args: {
+  elements: readonly CombinedPrintElement[];
+  assets: readonly CombinedPrintAsset[];
+  widthCm: number;
+  heightCm: number;
+}): Promise<Buffer | null> {
+  if (args.elements.length === 0) return null;
+  const widthCm = Math.max(1, Math.min(60, finiteNumber(args.widthCm, 21)));
+  const heightCm = Math.max(1, Math.min(60, finiteNumber(args.heightCm, 29.7)));
+  const canvasWidth = Math.round((widthCm / 2.54) * 300);
+  const canvasHeight = Math.round((heightCm / 2.54) * 300);
+  const assets = new Map(args.assets.map((asset) => [asset.uploadId, asset]));
+  const nodes = args.elements
+    .map((element) => renderCombinedElement(element, canvasWidth, canvasHeight, assets))
+    .join("\n");
+  if (!nodes.trim()) return null;
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${canvasWidth}" height="${canvasHeight}" viewBox="0 0 ${canvasWidth} ${canvasHeight}">${nodes}</svg>`;
+  return sharp(Buffer.from(svg))
+    .png({ compressionLevel: 9 })
+    .withMetadata({ density: 300 })
+    .toBuffer();
 }
 
 /**

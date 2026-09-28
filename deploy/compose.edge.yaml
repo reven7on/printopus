@@ -1,0 +1,34 @@
+# The only Compose project which binds public ports. Create the external
+# printopus-edge network once before starting it:
+#   docker network create printopus-edge
+services:
+  caddy:
+    image: caddy:2.11.4-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL:?ACME_EMAIL is required}
+      STAGING_DOMAIN: ${STAGING_DOMAIN:?STAGING_DOMAIN is required}
+      PRODUCTION_DOMAIN: ${PRODUCTION_DOMAIN:?PRODUCTION_DOMAIN is required}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [edge]
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+        max-file: "3"
+
+networks:
+  edge:
+    name: ${EDGE_NETWORK:-printopus-edge}
+    external: true
+
+volumes:
+  caddy_data:
+  caddy_config:

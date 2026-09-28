@@ -1,4 +1,5 @@
 .git
+.gitignore
 .next
 .data
 node_modules
@@ -10,4 +11,9 @@ npm-debug.log*
 backups
 coverage
 docs
+deploy
+uploads
+*.db
+*.sqlite
+.release
 print_site_ui_mockup_*.jpg

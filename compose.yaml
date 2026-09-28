@@ -1,13 +1,13 @@
 services:
   database:
-    image: postgres:17-alpine
+    image: postgres:17.11-alpine3.24
     restart: unless-stopped
     environment:
       POSTGRES_DB: printopus
       POSTGRES_USER: printopus
       POSTGRES_PASSWORD: printopus
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - printopus_postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -16,5 +16,104 @@ services:
       timeout: 5s
       retries: 10
 
+  migrations:
+    build:
+      context: .
+      target: migrations
+    environment:
+      DATABASE_URL: postgresql://printopus:printopus@database:5432/printopus?schema=public
+    depends_on:
+      database:
+        condition: service_healthy
+    restart: "no"
+
+  app:
+    build:
+      context: .
+      target: runner
+    restart: unless-stopped
+    stop_grace_period: 30s
+    environment:
+      NODE_ENV: production
+      DEPLOY_ENV: local
+      DATABASE_URL: postgresql://printopus:printopus@database:5432/printopus?schema=public
+      SITE_URL: http://localhost:3000
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change-me-locally}
+      ADMIN_SESSION_SECRET: ${ADMIN_SESSION_SECRET:-local-development-session-secret-change-me}
+      # LOCAL_* can override the normal variables when a separate test bot is
+      # available, but an existing local .env keeps working without renaming.
+      TELEGRAM_BOT_TOKEN: ${LOCAL_TELEGRAM_BOT_TOKEN:-${TELEGRAM_BOT_TOKEN:-}}
+      TELEGRAM_ADMIN_CHAT_ID: ${LOCAL_TELEGRAM_ADMIN_CHAT_ID:-${TELEGRAM_ADMIN_CHAT_ID:-}}
+      TELEGRAM_WEBHOOK_SECRET: ""
+      TELEGRAM_MANAGER_USER_IDS: ${LOCAL_TELEGRAM_MANAGER_USER_IDS:-${TELEGRAM_MANAGER_USER_IDS:-}}
+      UPLOAD_DIR: /var/lib/printopus/uploads
+      UPLOAD_MIN_FREE_BYTES: ${UPLOAD_MIN_FREE_BYTES:-0}
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - printopus_uploads:/var/lib/printopus/uploads
+    depends_on:
+      migrations:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+  telegram-worker:
+    profiles: ["telegram"]
+    build:
+      context: .
+      target: telegram-worker
+    restart: unless-stopped
+    stop_grace_period: 15s
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://printopus:printopus@database:5432/printopus?schema=public
+      SITE_URL: http://localhost:3000
+      TELEGRAM_BOT_TOKEN: ${LOCAL_TELEGRAM_BOT_TOKEN:-${TELEGRAM_BOT_TOKEN:-}}
+      TELEGRAM_ADMIN_CHAT_ID: ${LOCAL_TELEGRAM_ADMIN_CHAT_ID:-${TELEGRAM_ADMIN_CHAT_ID:-}}
+      UPLOAD_DIR: /var/lib/printopus/uploads
+    volumes:
+      - printopus_uploads:/var/lib/printopus/uploads:ro
+    depends_on:
+      migrations:
+        condition: service_completed_successfully
+
+  telegram-polling-setup:
+    profiles: ["telegram"]
+    build:
+      context: .
+      target: telegram-setup
+    command: ["node", "scripts/disable-telegram-webhook.mjs"]
+    environment:
+      TELEGRAM_BOT_TOKEN: ${LOCAL_TELEGRAM_BOT_TOKEN:-${TELEGRAM_BOT_TOKEN:-}}
+    restart: "no"
+
+  telegram-poller:
+    profiles: ["telegram"]
+    build:
+      context: .
+      target: telegram-worker
+    command: ["./node_modules/.bin/tsx", "scripts/telegram-bot-daemon.ts"]
+    restart: unless-stopped
+    stop_grace_period: 15s
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://printopus:printopus@database:5432/printopus?schema=public
+      SITE_URL: http://localhost:3000
+      TELEGRAM_BOT_TOKEN: ${LOCAL_TELEGRAM_BOT_TOKEN:-${TELEGRAM_BOT_TOKEN:-}}
+      TELEGRAM_ADMIN_CHAT_ID: ${LOCAL_TELEGRAM_ADMIN_CHAT_ID:-${TELEGRAM_ADMIN_CHAT_ID:-}}
+      TELEGRAM_MANAGER_USER_IDS: ${LOCAL_TELEGRAM_MANAGER_USER_IDS:-${TELEGRAM_MANAGER_USER_IDS:-}}
+    depends_on:
+      migrations:
+        condition: service_completed_successfully
+      telegram-polling-setup:
+        condition: service_completed_successfully
+
 volumes:
   printopus_postgres_data:
+  printopus_uploads:

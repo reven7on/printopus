@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import "dotenv/config";
 import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
@@ -44,13 +45,22 @@ test("renders the Printopus pages with the production Next.js server", { timeout
   let output = "";
   const server = spawn(process.execPath, [nextBin, "start", "--hostname", "127.0.0.1", "--port", String(port)], {
     cwd: projectRoot,
-    env: { ...process.env, NODE_ENV: "production", UPLOAD_DIR: uploadRoot },
+    env: {
+      ...process.env,
+      NODE_ENV: "production",
+      UPLOAD_DIR: uploadRoot,
+      TELEGRAM_BOT_TOKEN: "",
+      TELEGRAM_ADMIN_CHAT_ID: "",
+      TELEGRAM_WEBHOOK_SECRET: "",
+      TELEGRAM_MANAGER_USER_IDS: "",
+    },
     stdio: ["ignore", "pipe", "pipe"],
   });
   server.stdout.on("data", (chunk) => { output += chunk; });
   server.stderr.on("data", (chunk) => { output += chunk; });
   const processExited = new Promise((resolve) => server.once("exit", () => resolve("exited")));
   let createdOrderId = null;
+  let createdSilkOrderId = null;
   let createdDiscountId = null;
 
   try {
@@ -85,7 +95,7 @@ test("renders the Printopus pages with the production Next.js server", { timeout
       } else {
         assert.match(html, /href="https:\/\/printservice\.by\/configurator"/i);
         assert.match(visibleText, /Далее: Выбор цвета/i);
-        assert.match(visibleText, /от 15 BYN/i);
+        assert.match(visibleText, /от 20 BYN/i);
       }
     }
 
@@ -114,10 +124,12 @@ test("renders the Printopus pages with the production Next.js server", { timeout
     const publicShirt = catalog.products.find((product) => product.slug === "shirt");
     const publicCap = catalog.products.find((product) => product.slug === "cap");
     const publicDtf = publicShirt?.printMethods.find((method) => method.slug === "dtf");
+    const publicSilk = publicShirt?.printMethods.find((method) => method.slug === "silk");
     const publicA4 = publicDtf?.formats.find((format) => format.code === "A4");
     assert(publicShirt?.basePrice > 0);
     assert(publicCap);
     assert(publicDtf);
+    assert.equal(publicSilk?.recommendedFromQuantity, 30);
     assert(publicA4);
     assert.deepEqual(publicCap.printMethods.map((method) => method.slug), ["dtf", "embroidery"]);
     assert(publicCap.printMethods.every((method) => method.formats.every((format) => ["A7", "A6"].includes(format.code))));
@@ -132,6 +144,13 @@ test("renders the Printopus pages with the production Next.js server", { timeout
 
     const unauthorizedOverview = await fetch(`${baseUrl}/api/admin/overview`);
     assert.equal(unauthorizedOverview.status, 401);
+
+    const unconfiguredWebhook = await fetch(`${baseUrl}/api/telegram/webhook`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ update_id: 1 }),
+    });
+    assert.equal(unconfiguredWebhook.status, 503);
 
     const rejectedLogin = await fetch(`${baseUrl}/api/admin/session`, {
       method: "POST",
@@ -169,6 +188,7 @@ test("renders the Printopus pages with the production Next.js server", { timeout
     assert.match((await incompatiblePrintResponse.json()).error.message, /недоступны для выбранного изделия/i);
 
     const validOrderPayload = {
+        submissionId: randomUUID(),
         customerName: "Проверка API",
         customerPhone: "+375 (29) 555-20-30",
         contactMethod: "phone",
@@ -181,9 +201,66 @@ test("renders the Printopus pages with the production Next.js server", { timeout
         printFormatCode: "A4",
         placement: "center",
         quantity: 20,
-        design: { front: [] },
+        sizeDistribution: [
+          { size: "S", quantity: 5 },
+          { size: "M", quantity: 10 },
+          { size: "L", quantity: 5 },
+        ],
+        design: {
+          front: [{
+            id: "image-front",
+            uploadId: "image-front",
+            type: "image",
+            name: "octopus_logo.png",
+            x: 50,
+            y: 50,
+            scale: 1,
+            rotation: 0,
+            width: 40,
+            aspectRatio: 1,
+            quality: "good",
+          }, {
+            id: "image-front-copy",
+            uploadId: "image-front",
+            type: "image",
+            name: "octopus_logo.png копия",
+            x: 65,
+            y: 65,
+            scale: 0.8,
+            rotation: 10,
+            width: 30,
+            aspectRatio: 1,
+            quality: "good",
+          }],
+        },
         total: 1,
     };
+
+    const unknownSizeResponse = await fetch(`${baseUrl}/api/orders`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-forwarded-for": "203.0.113.22" },
+      body: JSON.stringify({
+        ...validOrderPayload,
+        submissionId: randomUUID(),
+        customerName: "Неизвестный размер",
+        sizeDistribution: [{ size: "M", quantity: 19 }, { size: "unknown", quantity: 1 }],
+        design: { front: [] },
+      }),
+    });
+    assert.equal(unknownSizeResponse.status, 400);
+    const unknownSizeError = await unknownSizeResponse.json();
+    assert.equal(unknownSizeError.error.field, "sizeDistribution");
+
+    const missingSource = new FormData();
+    missingSource.append("order", JSON.stringify({ ...validOrderPayload, customerName: "Потерянный исходник" }));
+    missingSource.append("fileUploadIds", JSON.stringify([]));
+    const missingSourceResponse = await fetch(`${baseUrl}/api/orders`, {
+      method: "POST",
+      headers: { "x-forwarded-for": "203.0.113.20" },
+      body: missingSource,
+    });
+    assert.equal(missingSourceResponse.status, 400);
+    assert.match((await missingSourceResponse.json()).error.message, /связать файлы/i);
 
     const disguisedVideo = new FormData();
     disguisedVideo.append("order", JSON.stringify({ ...validOrderPayload, customerName: "Опасный файл" }));
@@ -201,7 +278,9 @@ test("renders the Printopus pages with the production Next.js server", { timeout
     const validImage = await readFile(path.join(projectRoot, "public/test-octopus-logo.png"));
     const multipartOrder = new FormData();
     multipartOrder.append("order", JSON.stringify(validOrderPayload));
+    multipartOrder.append("fileUploadIds", JSON.stringify(["image-front"]));
     multipartOrder.append("files", new File([validImage], "octopus_logo.png", { type: "image/png" }));
+    multipartOrder.append("previews", new File([validImage], "mockup_front.png", { type: "image/png" }));
     const orderResponse = await fetch(`${baseUrl}/api/orders`, {
       method: "POST",
       body: multipartOrder,
@@ -214,17 +293,52 @@ test("renders the Printopus pages with the production Next.js server", { timeout
     assert.equal(createdOrder.order.total, expectedOrderTotal);
     assert.equal(createdOrder.order.assetCount, 1);
 
+    const silkOrderResponse = await fetch(`${baseUrl}/api/orders`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-forwarded-for": "203.0.113.23" },
+      body: JSON.stringify({
+        ...validOrderPayload,
+        submissionId: randomUUID(),
+        customerName: "Шелкография от одной штуки",
+        printMethodSlug: "silk",
+        quantity: 1,
+        sizeDistribution: undefined,
+        design: { front: [] },
+      }),
+    });
+    assert.equal(silkOrderResponse.status, 201);
+    const silkOrder = await silkOrderResponse.json();
+    createdSilkOrderId = silkOrder.order.id;
+
+    const duplicateOrderResponse = await fetch(`${baseUrl}/api/orders`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-forwarded-for": "203.0.113.21" },
+      body: JSON.stringify(validOrderPayload),
+    });
+    assert.equal(duplicateOrderResponse.status, 200);
+    const duplicateOrder = await duplicateOrderResponse.json();
+    assert.equal(duplicateOrder.duplicate, true);
+    assert.equal(duplicateOrder.order.id, createdOrderId);
+
     const database = new pg.Client({ connectionString: process.env.DATABASE_URL });
     await database.connect();
     try {
       const persisted = await database.query(
-        'SELECT o.total, i.quantity, i."unitPrice" FROM orders o JOIN order_items i ON i."orderId" = o.id WHERE o.id = $1',
+        'SELECT o.total, i.quantity, i."unitPrice", i."sizeBreakdown", a."designElementId", (SELECT COUNT(*) FROM order_previews p WHERE p."orderId" = o.id) AS "previewCount", (SELECT COUNT(*) FROM telegram_deliveries d WHERE d."orderId" = o.id) AS "deliveryCount" FROM orders o JOIN order_items i ON i."orderId" = o.id JOIN design_assets a ON a."orderItemId" = i.id WHERE o.id = $1',
         [createdOrderId],
       );
       assert.equal(persisted.rowCount, 1);
       assert.equal(Number(persisted.rows[0].total), expectedOrderTotal);
       assert.equal(persisted.rows[0].quantity, 20);
       assert.equal(Number(persisted.rows[0].unitPrice), expectedUnitPrice);
+      assert.deepEqual(persisted.rows[0].sizeBreakdown, [
+        { value: "s", label: "S", quantity: 5 },
+        { value: "m", label: "M", quantity: 10 },
+        { value: "l", label: "L", quantity: 5 },
+      ]);
+      assert.equal(persisted.rows[0].designElementId, "image-front");
+      assert.equal(Number(persisted.rows[0].previewCount), 1);
+      assert.equal(Number(persisted.rows[0].deliveryCount), 1);
     } finally {
       await database.end();
     }
@@ -244,6 +358,19 @@ test("renders the Printopus pages with the production Next.js server", { timeout
 
     const adminOverviewResponse = await fetch(`${baseUrl}/api/admin/overview`, { headers: { cookie: sessionCookie } });
     assert.equal(adminOverviewResponse.status, 200);
+    const overviewBeforeCompletion = await adminOverviewResponse.json();
+
+    const adminOrderResponse = await fetch(`${baseUrl}/api/admin/orders/${createdOrderId}`, { headers: { cookie: sessionCookie } });
+    assert.equal(adminOrderResponse.status, 200);
+    const adminOrder = await adminOrderResponse.json();
+    assert.equal(adminOrder.order.items[0].assets[0].designElementId, "image-front");
+    assert.deepEqual(adminOrder.order.items[0].sizeBreakdown, [
+      { value: "s", label: "S", quantity: 5 },
+      { value: "m", label: "M", quantity: 10 },
+      { value: "l", label: "L", quantity: 5 },
+    ]);
+    assert.equal(adminOrder.order.statusHistory[0].toStatus, "NEW");
+    assert.equal(adminOrder.order.statusHistory[0].changedBy, "Сайт");
 
     const adminCatalogResponse = await fetch(`${baseUrl}/api/admin/catalog`, { headers: { cookie: sessionCookie } });
     assert.equal(adminCatalogResponse.status, 200);
@@ -275,6 +402,29 @@ test("renders the Printopus pages with the production Next.js server", { timeout
     });
     assert.equal(catalogUpdate.status, 200);
 
+    const rolledBackBatch = await fetch(`${baseUrl}/api/admin/catalog`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie: sessionCookie, origin: baseUrl },
+      body: JSON.stringify({ updates: [
+        { resource: "discount", id: createdDiscountId, changes: { percent: 4 } },
+        { resource: "discount", id: "00000000-0000-0000-0000-000000000000", changes: { percent: 5 } },
+      ] }),
+    });
+    assert.equal(rolledBackBatch.status, 404);
+    const catalogAfterRollback = await fetch(`${baseUrl}/api/admin/catalog`, { headers: { cookie: sessionCookie } });
+    const rolledBackCatalog = await catalogAfterRollback.json();
+    assert.equal(rolledBackCatalog.discounts.find((discount) => discount.id === createdDiscountId)?.percent, 3);
+
+    const duplicateBatch = await fetch(`${baseUrl}/api/admin/catalog`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie: sessionCookie, origin: baseUrl },
+      body: JSON.stringify({ updates: [
+        { resource: "discount", id: createdDiscountId, changes: { percent: 4 } },
+        { resource: "discount", id: createdDiscountId, changes: { percent: 5 } },
+      ] }),
+    });
+    assert.equal(duplicateBatch.status, 400);
+
     const rejectedCatalogDelete = await fetch(`${baseUrl}/api/admin/catalog`, {
       method: "DELETE",
       headers: { "content-type": "application/json", cookie: sessionCookie },
@@ -289,6 +439,13 @@ test("renders the Printopus pages with the production Next.js server", { timeout
     });
     assert.equal(catalogDelete.status, 200);
     assert.deepEqual(await catalogDelete.json(), { deleted: true });
+
+    const rejectedStatusJump = await fetch(`${baseUrl}/api/admin/orders/${createdOrderId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie: sessionCookie, origin: baseUrl },
+      body: JSON.stringify({ status: "COMPLETED" }),
+    });
+    assert.equal(rejectedStatusJump.status, 400);
 
     const statusResponse = await fetch(`${baseUrl}/api/admin/orders/${createdOrderId}`, {
       method: "PATCH",
@@ -315,6 +472,20 @@ test("renders the Printopus pages with the production Next.js server", { timeout
     assert.equal(assetResponse.headers.get("x-content-type-options"), "nosniff");
     assert.match(assetResponse.headers.get("content-disposition") ?? "", /^attachment;/);
     assert((await assetResponse.arrayBuffer()).byteLength > 1_000);
+
+    for (const status of ["IN_PRODUCTION", "READY", "COMPLETED"]) {
+      const response = await fetch(`${baseUrl}/api/admin/orders/${createdOrderId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", cookie: sessionCookie, origin: baseUrl },
+        body: JSON.stringify({ status }),
+      });
+      assert.equal(response.status, 200);
+    }
+    const overviewAfterCompletionResponse = await fetch(`${baseUrl}/api/admin/overview`, { headers: { cookie: sessionCookie } });
+    assert.equal(overviewAfterCompletionResponse.status, 200);
+    const overviewAfterCompletion = await overviewAfterCompletionResponse.json();
+    assert.equal(overviewAfterCompletion.activeRevenue, overviewBeforeCompletion.activeRevenue - expectedOrderTotal);
+    assert.equal(overviewAfterCompletion.activeOrderCount, overviewBeforeCompletion.activeOrderCount - 1);
   } catch (error) {
     error.message += `\nNext.js output:\n${output}`;
     throw error;
@@ -328,7 +499,7 @@ test("renders the Printopus pages with the production Next.js server", { timeout
           await database.query('DELETE FROM admin_audit_log WHERE "entityId" = $1', [createdDiscountId]);
           await database.query("DELETE FROM volume_discounts WHERE id = $1", [createdDiscountId]);
         }
-        await database.query("DELETE FROM orders WHERE id = $1", [createdOrderId]);
+        await database.query("DELETE FROM orders WHERE id = ANY($1::uuid[])", [[createdOrderId, createdSilkOrderId].filter(Boolean)]);
       } finally {
         await database.end();
       }

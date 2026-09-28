@@ -4,6 +4,7 @@ import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
+import { formatBelarusianPhone } from "../../order-validation";
 
 type Tab = "overview" | "orders" | "catalog";
 type CatalogTab = "products" | "methods" | "formats" | "discounts";
@@ -28,12 +29,13 @@ type OrderSummary = {
 
 type CatalogOption = { id: string; type: "COLOR" | "SIZE"; value: string; label: string; colorHex: string | null; priceDelta: number; active: boolean; sortOrder: number };
 type ProductPrintFormat = { id: string; printFormatId: string; code: string; widthCm: number; heightCm: number; priceDelta: number; active: boolean; sortOrder: number };
-type ProductPrintMethod = { id: string; printMethodId: string; slug: string; name: string; description: string | null; priceDelta: number; active: boolean; sortOrder: number; formats: ProductPrintFormat[] };
+type ProductPrintMethod = { id: string; printMethodId: string; slug: string; name: string; description: string | null; recommendedFromQuantity: number | null; priceDelta: number; active: boolean; sortOrder: number; formats: ProductPrintFormat[] };
 type CatalogProduct = { id: string; slug: string; name: string; description: string | null; basePrice: number; active: boolean; sortOrder: number; options: CatalogOption[]; printMethods: ProductPrintMethod[] };
-type PrintMethod = { id: string; slug: string; name: string; description: string | null; priceDelta: number; active: boolean; sortOrder: number };
+type PrintMethod = { id: string; slug: string; name: string; description: string | null; recommendedFromQuantity: number | null; priceDelta: number; active: boolean; sortOrder: number };
 type PrintFormat = { id: string; code: string; widthCm: number; heightCm: number; priceDelta: number; active: boolean; sortOrder: number };
 type Discount = { id: string; minQuantity: number; percent: number; active: boolean };
 type Catalog = { products: CatalogProduct[]; printMethods: PrintMethod[]; printFormats: PrintFormat[]; discounts: Discount[] };
+type CatalogUndo = { key: string; resource: DirtyCatalogResource; id: string };
 type OverviewData = {
   counts: Record<OrderStatus, number>;
   totalOrders: number;
@@ -107,6 +109,7 @@ export default function AdminApp({ username }: { username: string }) {
   const [orders, setOrders] = useState<OrderSummary[]>([]);
   const [pagination, setPagination] = useState({ page: 1, pages: 1, total: 0 });
   const [orderStatus, setOrderStatus] = useState(() => searchParams.get("status") ?? "");
+  const [orderSearchInput, setOrderSearchInput] = useState(() => searchParams.get("search") ?? "");
   const [orderSearch, setOrderSearch] = useState(() => searchParams.get("search") ?? "");
   const [orderSort, setOrderSort] = useState(() => searchParams.get("sort") ?? "date-desc");
   const [catalog, setCatalog] = useState<Catalog | null>(null);
@@ -116,7 +119,10 @@ export default function AdminApp({ username }: { username: string }) {
   const [dirtyCatalogItems, setDirtyCatalogItems] = useState<Array<{ resource: DirtyCatalogResource; id: string }>>([]);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
+  const [catalogUndos, setCatalogUndos] = useState<CatalogUndo[]>([]);
   const skipOrderRefresh = useRef(true);
+  const ordersAbortController = useRef<AbortController | null>(null);
+  const catalogUndoTimers = useRef(new Map<string, number>());
   const initialOrderFilters = useRef({ search: orderSearch, status: orderStatus, sort: orderSort });
 
   const loadOverview = useCallback(async () => {
@@ -124,13 +130,22 @@ export default function AdminApp({ username }: { username: string }) {
   }, []);
 
   const loadOrders = useCallback(async (page = 1, search = orderSearch, status = orderStatus, sort = orderSort) => {
+    ordersAbortController.current?.abort();
+    const controller = new AbortController();
+    ordersAbortController.current = controller;
     const params = new URLSearchParams({ page: String(page), pageSize: "25" });
     if (search.trim()) params.set("search", search.trim());
     if (status) params.set("status", status);
     if (sort) params.set("sort", sort);
-    const result = await api<{ orders: OrderSummary[]; pagination: typeof pagination }>(`/api/admin/orders?${params}`);
-    setOrders(result.orders);
-    setPagination(result.pagination);
+    try {
+      const result = await api<{ orders: OrderSummary[]; pagination: typeof pagination }>(`/api/admin/orders?${params}`, { signal: controller.signal });
+      if (!controller.signal.aborted) {
+        setOrders(result.orders);
+        setPagination(result.pagination);
+      }
+    } catch (reason) {
+      if (!controller.signal.aborted) throw reason;
+    }
   }, [orderSearch, orderSort, orderStatus]);
 
   const handleRefreshOrders = useCallback(async () => {
@@ -170,12 +185,22 @@ export default function AdminApp({ username }: { username: string }) {
   }, []);
 
   useEffect(() => {
+    const timer = window.setTimeout(() => setOrderSearch(orderSearchInput), 300);
+    return () => window.clearTimeout(timer);
+  }, [orderSearchInput]);
+
+  useEffect(() => {
     if (skipOrderRefresh.current) {
       skipOrderRefresh.current = false;
       return;
     }
     void loadOrders(1);
   }, [loadOrders]);
+
+  useEffect(() => () => {
+    ordersAbortController.current?.abort();
+    catalogUndoTimers.current.forEach((timer) => window.clearTimeout(timer));
+  }, []);
 
   useEffect(() => {
     const params = new URLSearchParams();
@@ -262,6 +287,72 @@ export default function AdminApp({ username }: { username: string }) {
     if (trackChanges) markCatalogDirty("productPrintFormat", formatId);
   }
 
+  function setCatalogResourceActive(resource: DirtyCatalogResource, id: string, active: boolean) {
+    setCatalog((current) => {
+      if (!current) return current;
+      if (resource === "option") return {
+        ...current,
+        products: current.products.map((product) => ({
+          ...product,
+          options: product.options.map((option) => option.id === id ? { ...option, active } : option),
+        })),
+      };
+      if (resource === "productPrintMethod") return {
+        ...current,
+        products: current.products.map((product) => ({
+          ...product,
+          printMethods: product.printMethods.map((method) => method.id === id ? { ...method, active } : method),
+        })),
+      };
+      if (resource === "productPrintFormat") return {
+        ...current,
+        products: current.products.map((product) => ({
+          ...product,
+          printMethods: product.printMethods.map((method) => ({
+            ...method,
+            formats: method.formats.map((format) => format.id === id ? { ...format, active } : format),
+          })),
+        })),
+      };
+      const collection = resource === "product" ? "products" : resource === "printMethod" ? "printMethods" : resource === "printFormat" ? "printFormats" : "discounts";
+      return { ...current, [collection]: current[collection].map((item) => item.id === id ? { ...item, active } : item) } as Catalog;
+    });
+  }
+
+  function dismissCatalogUndo(key: string) {
+    const timer = catalogUndoTimers.current.get(key);
+    if (timer !== undefined) window.clearTimeout(timer);
+    catalogUndoTimers.current.delete(key);
+    setCatalogUndos((current) => current.filter((item) => item.key !== key));
+  }
+
+  function offerCatalogUndo(resource: DirtyCatalogResource, id: string) {
+    const key = `${resource}:${id}`;
+    dismissCatalogUndo(key);
+    setCatalogUndos((current) => [...current, { key, resource, id }]);
+    catalogUndoTimers.current.set(key, window.setTimeout(() => dismissCatalogUndo(key), 5_000));
+  }
+
+  async function undoCatalogDeactivation(undo: CatalogUndo) {
+    dismissCatalogUndo(undo.key);
+    setCatalogResourceActive(undo.resource, undo.id, true);
+    setSaving(`status:${undo.id}`);
+    setError("");
+    try {
+      await api("/api/admin/catalog", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resource: undo.resource, id: undo.id, changes: { active: true } }),
+      });
+      setNotice("Отключение отменено.");
+    } catch (reason) {
+      await loadCatalog().catch(() => undefined);
+      setError(reason instanceof Error ? reason.message : "Не удалось отменить отключение.");
+    } finally {
+      setSaving("");
+    }
+  }
+
   async function saveCatalogStatus(resource: DirtyCatalogResource, id: string, active: boolean) {
     setSaving(`status:${id}`);
     setError("");
@@ -271,37 +362,11 @@ export default function AdminApp({ username }: { username: string }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ resource, id, changes: { active } }),
       });
+      if (active) dismissCatalogUndo(`${resource}:${id}`);
+      else offerCatalogUndo(resource, id);
       setNotice(active ? "Позиция опубликована на сайте." : "Позиция скрыта с сайта.");
     } catch (reason) {
-      setCatalog((current) => {
-        if (!current) return current;
-        if (resource === "option") return {
-          ...current,
-          products: current.products.map((product) => ({
-            ...product,
-            options: product.options.map((option) => option.id === id ? { ...option, active: !active } : option),
-          })),
-        };
-        if (resource === "productPrintMethod") return {
-          ...current,
-          products: current.products.map((product) => ({
-            ...product,
-            printMethods: product.printMethods.map((method) => method.id === id ? { ...method, active: !active } : method),
-          })),
-        };
-        if (resource === "productPrintFormat") return {
-          ...current,
-          products: current.products.map((product) => ({
-            ...product,
-            printMethods: product.printMethods.map((method) => ({
-              ...method,
-              formats: method.formats.map((format) => format.id === id ? { ...format, active: !active } : format),
-            })),
-          })),
-        };
-        const collection = resource === "product" ? "products" : resource === "printMethod" ? "printMethods" : resource === "printFormat" ? "printFormats" : "discounts";
-        return { ...current, [collection]: current[collection].map((item) => item.id === id ? { ...item, active: !active } : item) } as Catalog;
-      });
+      setCatalogResourceActive(resource, id, !active);
       setError(reason instanceof Error ? reason.message : "Не удалось изменить доступность.");
     } finally {
       setSaving("");
@@ -313,7 +378,7 @@ export default function AdminApp({ username }: { username: string }) {
     setSaving("catalog-changes");
     setError("");
     try {
-      await Promise.all(dirtyCatalogItems.map(({ resource, id }) => {
+      const updates = dirtyCatalogItems.flatMap(({ resource, id }) => {
         let changes: Record<string, unknown> | null = null;
         if (resource === "product") {
           const item = catalog.products.find((product) => product.id === id);
@@ -323,7 +388,7 @@ export default function AdminApp({ username }: { username: string }) {
           if (item) changes = { label: item.label, colorHex: item.colorHex };
         } else if (resource === "printMethod") {
           const item = catalog.printMethods.find((method) => method.id === id);
-          if (item) changes = { name: item.name, description: item.description, priceDelta: item.priceDelta };
+          if (item) changes = { name: item.name, description: item.description, priceDelta: item.priceDelta, recommendedFromQuantity: item.recommendedFromQuantity };
         } else if (resource === "printFormat") {
           const item = catalog.printFormats.find((format) => format.id === id);
           if (item) changes = { widthCm: item.widthCm, heightCm: item.heightCm, priceDelta: item.priceDelta };
@@ -337,13 +402,13 @@ export default function AdminApp({ username }: { username: string }) {
           const item = catalog.discounts.find((discount) => discount.id === id);
           if (item) changes = { minQuantity: item.minQuantity, percent: item.percent };
         }
-        if (!changes) return Promise.resolve();
-        return api("/api/admin/catalog", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ resource, id, changes }),
-        });
-      }));
+        return changes ? [{ resource, id, changes }] : [];
+      });
+      await api("/api/admin/catalog", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ updates }),
+      });
       await Promise.all([loadCatalog(), loadOverview()]);
       setDirtyCatalogItems([]);
       setNotice("Все изменения каталога сохранены.");
@@ -454,6 +519,7 @@ export default function AdminApp({ username }: { username: string }) {
 
         {notice && <button type="button" className="admin-notice success" onClick={() => setNotice("")} aria-label="Закрыть сообщение">{notice}<span>×</span></button>}
         {error && <button type="button" className="admin-notice error" onClick={() => setError("")} aria-label="Закрыть ошибку">{error}<span>×</span></button>}
+        {catalogUndos.length > 0 && <div className="admin-undo-stack" aria-live="polite">{catalogUndos.map((undo) => <div key={undo.key}><span>Позиция скрыта с сайта.</span><button type="button" disabled={saving === `status:${undo.id}`} onClick={() => void undoCatalogDeactivation(undo)}>Отменить</button></div>)}</div>}
         {loading ? <div className="admin-loading">Загружаем рабочее пространство…</div> : (
           <>
             {tab === "overview" && overview && <Overview overview={overview} onOpenOrder={openOrder} />}
@@ -461,12 +527,12 @@ export default function AdminApp({ username }: { username: string }) {
               <OrdersView
                 orders={orders}
                 pagination={pagination}
-                search={orderSearch}
+                search={orderSearchInput}
                 status={orderStatus}
                 sort={orderSort}
                 counts={overview?.counts}
                 refreshing={refreshingOrders}
-                onSearch={setOrderSearch}
+                onSearch={setOrderSearchInput}
                 onStatus={setOrderStatus}
                 onSort={setOrderSort}
                 onPage={(page) => loadOrders(page)}
@@ -511,7 +577,7 @@ export default function AdminApp({ username }: { username: string }) {
 function Overview({ overview, onOpenOrder }: { overview: OverviewData; onOpenOrder: (id: string) => void }) {
   const cards = [
     { label: "Всего заказов", value: overview.totalOrders, note: `${overview.counts.NEW} требуют внимания` },
-    { label: "Активная сумма", value: money(overview.activeRevenue), note: `${overview.activeOrderCount} без отменённых` },
+    { label: "Сумма активных заказов", value: money(overview.activeRevenue), note: `${overview.activeOrderCount} в работе` },
     { label: "В производстве", value: overview.counts.IN_PRODUCTION, note: `${overview.counts.READY} готовы к выдаче` },
     { label: "Активных товаров", value: overview.activeProducts, note: "публичный каталог" },
   ];
@@ -520,7 +586,7 @@ function Overview({ overview, onOpenOrder }: { overview: OverviewData; onOpenOrd
       <section className="admin-metrics">{cards.map((card) => <article key={card.label}><small>{card.label}</small><strong>{card.value}</strong><span>{card.note}</span></article>)}</section>
       <div className="admin-grid-two">
         <section className="admin-card">
-          <header><div><span className="admin-kicker">Последние</span><h2>Новые заявки</h2></div></header>
+          <header><div><span className="admin-kicker">Последние</span><h2>Последние заказы</h2></div></header>
           <div className="admin-order-mini-list">
             {overview.recentOrders.length ? overview.recentOrders.map((order: OrderSummary) => (
               <button key={order.id} type="button" onClick={() => onOpenOrder(order.id)}>
@@ -601,7 +667,7 @@ function OrdersView(props: {
           <tbody>{props.orders.map((order) => (
             <tr key={order.id} className={`admin-order-row ${order.status === "NEW" ? "is-new" : ""}`} tabIndex={0} role="link" onClick={() => props.onOpen(order.id)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); props.onOpen(order.id); } }}>
               <td><b>{order.orderNumber}</b><small>{timeAgo(order.createdAt)} · {dateTime(order.createdAt)} · {plural(order.itemCount, "позиция", "позиции", "позиций")}</small></td>
-              <td><b>{order.customerName}</b><small>+{order.customerPhone}</small></td>
+              <td><b>{order.customerName}</b><small>{formatBelarusianPhone(order.customerPhone)}</small></td>
               <td>{order.fulfillmentMethod === "DELIVERY" ? "Доставка" : "Самовывоз"}</td>
               <td><strong>{money(order.total)}</strong></td>
               <td><em className="admin-status" data-status={order.status}>{statusLabels[order.status]}</em></td>
@@ -625,7 +691,7 @@ function OrdersView(props: {
               <div className="admin-mobile-order-body">
                 <div className="admin-mobile-order-info">
                   <strong>{order.customerName}</strong>
-                  <small>+{order.customerPhone} · {order.fulfillmentMethod === "DELIVERY" ? "Доставка" : "Самовывоз"}</small>
+                  <small>{formatBelarusianPhone(order.customerPhone)} · {order.fulfillmentMethod === "DELIVERY" ? "Доставка" : "Самовывоз"}</small>
                 </div>
                 <div className="admin-mobile-order-price">
                   <strong>{money(order.total)}</strong>
@@ -813,7 +879,7 @@ function CatalogView(props: {
         </article>
       ))}</div>}
 
-      {props.tab === "methods" && <><aside className="admin-catalog-reference-note">Это справочник названий технологий. Доступность и цена настраиваются отдельно внутри каждого товара.</aside><CatalogTable title="Справочник способов" columns={["Название", "Описание", "Начальная цена для новых товаров", "Статус", ""]}>{props.catalog.printMethods.map((item) => <tr key={item.id}><td><input value={item.name} onChange={(event) => props.updateItem("printMethods", item.id, { name: event.target.value })} /><small>{item.slug}</small></td><td><input value={item.description ?? ""} onChange={(event) => props.updateItem("printMethods", item.id, { description: event.target.value })} /></td><td><input type="number" min="0" step="0.01" value={item.priceDelta} onChange={(event) => props.updateItem("printMethods", item.id, { priceDelta: Number(event.target.value) })} /></td><td><CatalogSwitch checked={item.active} busy={props.saving === `status:${item.id}`} onLabel="В справочнике" onChange={(active) => { props.updateItem("printMethods", item.id, { active }, false); void props.saveStatus("printMethod", item.id, active); }} /></td><td><CatalogDeleteButton label={item.name} busy={props.saving === `delete:${item.id}`} onDelete={() => void props.deleteItem("printMethod", item.id, item.name)} /></td></tr>)}</CatalogTable></>}
+      {props.tab === "methods" && <><aside className="admin-catalog-reference-note">Это справочник названий технологий. Доступность и цена настраиваются отдельно внутри каждого товара.</aside><CatalogTable title="Справочник способов" columns={["Название", "Описание", "Выгодно от, шт.", "Начальная цена", "Статус", ""]}>{props.catalog.printMethods.map((item) => <tr key={item.id}><td><input value={item.name} onChange={(event) => props.updateItem("printMethods", item.id, { name: event.target.value })} /><small>{item.slug}</small></td><td><input value={item.description ?? ""} onChange={(event) => props.updateItem("printMethods", item.id, { description: event.target.value })} /></td><td><input type="number" min="2" step="1" value={item.recommendedFromQuantity ?? ""} placeholder="—" aria-label={`Выгодно от для ${item.name}`} onChange={(event) => props.updateItem("printMethods", item.id, { recommendedFromQuantity: event.target.value === "" ? null : Number(event.target.value) })} /></td><td><input type="number" min="0" step="0.01" value={item.priceDelta} onChange={(event) => props.updateItem("printMethods", item.id, { priceDelta: Number(event.target.value) })} /></td><td><CatalogSwitch checked={item.active} busy={props.saving === `status:${item.id}`} onLabel="В справочнике" onChange={(active) => { props.updateItem("printMethods", item.id, { active }, false); void props.saveStatus("printMethod", item.id, active); }} /></td><td><CatalogDeleteButton label={item.name} busy={props.saving === `delete:${item.id}`} onDelete={() => void props.deleteItem("printMethod", item.id, item.name)} /></td></tr>)}</CatalogTable></>}
       {props.tab === "formats" && <><aside className="admin-catalog-reference-note">Это справочник физических размеров. Какие форматы подходят товару и способу печати, задаётся внутри товара.</aside><CatalogTable title="Справочник форматов" columns={["Код", "Ширина, см", "Высота, см", "Начальная доплата", "Статус", ""]}>{props.catalog.printFormats.map((item) => <tr key={item.id}><td><b>{item.code}</b></td><td><input type="number" min="1" step="0.1" value={item.widthCm} onChange={(event) => props.updateItem("printFormats", item.id, { widthCm: Number(event.target.value) })} /></td><td><input type="number" min="1" step="0.1" value={item.heightCm} onChange={(event) => props.updateItem("printFormats", item.id, { heightCm: Number(event.target.value) })} /></td><td><input type="number" min="0" step="0.01" value={item.priceDelta} onChange={(event) => props.updateItem("printFormats", item.id, { priceDelta: Number(event.target.value) })} /></td><td><CatalogSwitch checked={item.active} busy={props.saving === `status:${item.id}`} onLabel="В справочнике" onChange={(active) => { props.updateItem("printFormats", item.id, { active }, false); void props.saveStatus("printFormat", item.id, active); }} /></td><td><CatalogDeleteButton label={`формат ${item.code}`} busy={props.saving === `delete:${item.id}`} onDelete={() => void props.deleteItem("printFormat", item.id, `Формат ${item.code}`)} /></td></tr>)}</CatalogTable></>}
       {props.tab === "discounts" && <CatalogTable title="Скидки за тираж" columns={["Количество от", "Скидка, %", "Статус", ""]}>{props.catalog.discounts.map((item) => <tr key={item.id}><td><input type="number" min="1" value={item.minQuantity} onChange={(event) => props.updateItem("discounts", item.id, { minQuantity: Number(event.target.value) })} /></td><td><input type="number" min="0" max="100" step="0.01" value={item.percent} onChange={(event) => props.updateItem("discounts", item.id, { percent: Number(event.target.value) })} /></td><td><CatalogSwitch checked={item.active} busy={props.saving === `status:${item.id}`} onLabel="Доступна" onChange={(active) => { props.updateItem("discounts", item.id, { active }, false); void props.saveStatus("discount", item.id, active); }} /></td><td><CatalogDeleteButton label={`скидку от ${item.minQuantity} шт.`} busy={props.saving === `delete:${item.id}`} onDelete={() => void props.deleteItem("discount", item.id, `Скидка от ${item.minQuantity} шт.`)} /></td></tr>)}</CatalogTable>}
 
@@ -828,5 +894,5 @@ function CatalogTable({ title, columns, children }: { title: string; columns: st
 
 function NewCatalogItemForm({ tab, saving, onSubmit }: { tab: Exclude<CatalogTab, "products">; saving: string; onSubmit: (event: FormEvent<HTMLFormElement>, resource: string) => Promise<void> }) {
   const resource = tab === "methods" ? "printMethod" : tab === "formats" ? "printFormat" : "discount";
-  return <form className="admin-card admin-new-record" onSubmit={(event) => onSubmit(event, resource)}><header><div><span className="admin-kicker">Новая запись</span><h2>{tab === "methods" ? "Добавить способ печати" : tab === "formats" ? "Добавить формат" : "Добавить уровень скидки"}</h2></div></header><div>{tab === "methods" && <><input name="slug" required placeholder="Код" /><input name="name" required placeholder="Название" /><input name="description" placeholder="Описание" /><input name="priceDelta" required type="number" min="0" step="0.01" placeholder="Доплата" /></>}{tab === "formats" && <><input name="code" required placeholder="Код, например A2" /><input name="widthCm" required type="number" min="1" step="0.1" placeholder="Ширина, см" /><input name="heightCm" required type="number" min="1" step="0.1" placeholder="Высота, см" /><input name="priceDelta" required type="number" min="0" step="0.01" placeholder="Доплата" /></>}{tab === "discounts" && <><input name="minQuantity" required type="number" min="1" placeholder="От количества" /><input name="percent" required type="number" min="0" max="100" step="0.01" placeholder="Скидка, %" /></>}<button disabled={saving === `new-${resource}`}>{saving === `new-${resource}` ? "Добавляем…" : "Добавить"}</button></div></form>;
+  return <form className="admin-card admin-new-record" onSubmit={(event) => onSubmit(event, resource)}><header><div><span className="admin-kicker">Новая запись</span><h2>{tab === "methods" ? "Добавить способ печати" : tab === "formats" ? "Добавить формат" : "Добавить уровень скидки"}</h2></div></header><div>{tab === "methods" && <><input name="slug" required placeholder="Код" /><input name="name" required placeholder="Название" /><input name="description" placeholder="Описание" /><input name="recommendedFromQuantity" type="number" min="2" step="1" placeholder="Выгодно от, шт. (необязательно)" /><input name="priceDelta" required type="number" min="0" step="0.01" placeholder="Доплата" /></>}{tab === "formats" && <><input name="code" required placeholder="Код, например A2" /><input name="widthCm" required type="number" min="1" step="0.1" placeholder="Ширина, см" /><input name="heightCm" required type="number" min="1" step="0.1" placeholder="Высота, см" /><input name="priceDelta" required type="number" min="0" step="0.01" placeholder="Доплата" /></>}{tab === "discounts" && <><input name="minQuantity" required type="number" min="1" placeholder="От количества" /><input name="percent" required type="number" min="0" max="100" step="0.01" placeholder="Скидка, %" /></>}<button disabled={saving === `new-${resource}`}>{saving === `new-${resource}` ? "Добавляем…" : "Добавить"}</button></div></form>;
 }

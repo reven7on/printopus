@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily off-site Printopus backup (%i)
+
+[Timer]
+OnCalendar=*-*-* 02:30:00
+RandomizedDelaySec=45m
+Persistent=true
+Unit=printopus-backup@%i.service
+
+[Install]
+WantedBy=timers.target

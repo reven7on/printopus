@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { getAutomaticPrintEstimate } from "../app/configurator/editor-math.ts";
-import { isValidBelarusianPhone, normalizePhone } from "../app/order-validation.ts";
+import { formatBelarusianPhone, getPhoneHref, isValidBelarusianPhone, normalizeBelarusianPhone, normalizePhone } from "../app/order-validation.ts";
 import {
   calculateOrderQuote,
   OrderInputError,
@@ -61,6 +61,14 @@ test("Belarusian phone validation accepts supported formats and rejects incomple
   assert.equal(isValidBelarusianPhone("+7 999 555-20-30"), false);
 });
 
+test("legacy Belarusian phone formats share one display and dialing value", () => {
+  for (const phone of ["375295552030", "+375295552030", "80 29 555-20-30", "++375 (29) 555-20-30"]) {
+    assert.equal(normalizeBelarusianPhone(phone), "375295552030");
+    assert.equal(formatBelarusianPhone(phone), "+375 (29) 555-20-30");
+    assert.equal(getPhoneHref(phone), "tel:+375295552030");
+  }
+});
+
 test("editor estimates print format from the actual artwork dimensions", () => {
   const zones = { shirt: { front: { width: 33, height: 40 } } };
   const empty = getAutomaticPrintEstimate({ front: [] }, "shirt", zones, PRINT_FORMATS);
@@ -84,7 +92,8 @@ test("editor estimates print format from the actual artwork dimensions", () => {
 });
 
 test("configurator distinguishes a ready empty catalog from loading fallback data", async () => {
-  const configurator = await readFile(new URL("../app/configurator/page.tsx", import.meta.url), "utf8");
+  const configurator = await readFile(new URL("../app/configurator/configurator-client.tsx", import.meta.url), "utf8");
+  const page = await readFile(new URL("../app/configurator/page.tsx", import.meta.url), "utf8");
   const catalogHook = await readFile(new URL("../app/use-public-catalog.ts", import.meta.url), "utf8");
 
   assert.match(catalogHook, /status:\s*"ready"/);
@@ -92,19 +101,42 @@ test("configurator distinguishes a ready empty catalog from loading fallback dat
   assert.match(configurator, /selectedCatalogItem\?\.printMethods/);
   assert.match(configurator, /const availablePrintSizes = selectedMethod\?\.formats/);
   assert.match(configurator, /const discount = catalogReady/);
+  assert.match(configurator, /usePublicCatalog\(initialCatalog\)/);
+  assert.match(page, /dynamic = "force-dynamic"/);
   assert.doesNotMatch(configurator, /printFormats\.length\s*>=\s*4/);
 });
 
 test("landing does not restore inactive catalog items or a fallback DTF price", async () => {
-  const landing = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const landing = await readFile(new URL("../app/home-client.tsx", import.meta.url), "utf8");
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
 
   assert.match(landing, /useState<number \| null>\(null\)/);
   assert.match(landing, /const catalogReady = publicCatalogStatus === "ready"/);
   assert.match(landing, /const visibleProducts = catalogReady/);
   assert.match(landing, /fallbackBasePrices\.flatMap/);
   assert.match(landing, /selectedCatalogPriceProduct\?\.printMethods\.find\(\(method\) => method\.slug === "dtf"\)/);
-  assert.match(landing, /: catalogReady \? \[\] : fallbackPrintPrices/);
+  assert.match(landing, /catalogLoading \? fallbackPrintPrices : \[\]/);
+  assert.match(landing, /usePublicCatalog\(initialCatalog\)/);
+  assert.match(page, /loadPublicCatalogOrNull/);
   assert.doesNotMatch(landing, /priceDelta \?\? DEFAULT_PRINT_METHOD_PRICE/);
+});
+
+test("draft images are reconstructed and missing files cannot be submitted", async () => {
+  const configurator = await readFile(new URL("../app/configurator/configurator-client.tsx", import.meta.url), "utf8");
+  const orderRoute = await readFile(new URL("../app/api/orders/route.ts", import.meta.url), "utf8");
+
+  assert.match(configurator, /function restoreDraftImageFile/);
+  assert.match(configurator, /pendingUploadsRef\.current\.set\(element\.uploadId, restoredFile\)/);
+  assert.match(configurator, /fileEntries\.length !== activeUploadIds\.length/);
+  assert.match(orderRoute, /effectiveFileUploadIds\.length !== designUploadIds\.size/);
+});
+
+test("production image installs fonts used by server-side print rendering", async () => {
+  const dockerfile = await readFile(new URL("../Dockerfile", import.meta.url), "utf8");
+  assert.match(dockerfile, /fontconfig/);
+  assert.match(dockerfile, /font-noto/);
+  assert.match(dockerfile, /font-liberation-sans-narrow/);
+  assert.match(dockerfile, /font-urw-base35/);
 });
 
 test("admin catalog uses immediate switches and one contextual save action", async () => {
@@ -120,6 +152,9 @@ test("admin catalog uses immediate switches and one contextual save action", asy
   assert.match(admin, /admin-context-savebar/);
   assert.match(admin, /saveCatalogChanges/);
   assert.match(admin, /saveCatalogStatus/);
+  assert.match(admin, /body: JSON\.stringify\(\{ updates \}\)/);
+  assert.match(admin, /offerCatalogUndo/);
+  assert.match(admin, /recommendedFromQuantity/);
   assert.match(admin, /function CatalogDeleteButton/);
   assert.match(admin, /method: "DELETE"/);
   assert.doesNotMatch(admin, /Сохранить поля/);
@@ -128,9 +163,25 @@ test("admin catalog uses immediate switches and one contextual save action", asy
   assert.doesNotMatch(admin, /className="admin-options-grid"/);
 });
 
+test("catalog recommendations and landing promises come from the public catalog", async () => {
+  const landing = await readFile(new URL("../app/home-client.tsx", import.meta.url), "utf8");
+  const configurator = await readFile(new URL("../app/configurator/configurator-client.tsx", import.meta.url), "utf8");
+  const catalogRoute = await readFile(new URL("../app/api/admin/catalog/route.ts", import.meta.url), "utf8");
+
+  assert.match(landing, /slug: "polo"/);
+  assert.match(landing, /availableSizeLabels/);
+  assert.match(landing, /recommendedFromQuantity/);
+  assert.match(landing, /useState\(""\)/);
+  assert.match(configurator, /entry\.recommendedFromQuantity/);
+  assert.match(configurator, /dtfIsAvailable/);
+  assert.match(catalogRoute, /body\.updates\.length > 100/);
+  assert.match(catalogRoute, /uniqueTargets\.size !== updates\.length/);
+  assert.match(catalogRoute, /database\.\$transaction/);
+});
+
 test("responsive contracts cover landing navigation and configurator controls", async () => {
   const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
-  const configurator = await readFile(new URL("../app/configurator/page.tsx", import.meta.url), "utf8");
+  const configurator = await readFile(new URL("../app/configurator/configurator-client.tsx", import.meta.url), "utf8");
 
   assert.match(css, /@media\s*\(max-width:\s*760px\)/);
   assert.match(css, /\.mobile-drawer\.open/);
@@ -164,6 +215,91 @@ test("order input is normalized and rejects incomplete delivery data", () => {
     () => parseCreateOrderInput({ ...input, fulfillmentMethod: "delivery", deliveryAddress: "" }),
     (error) => error instanceof OrderInputError && error.field === "deliveryAddress",
   );
+});
+
+test("order size distribution is normalized and must exactly match the print run", () => {
+  const baseOrder = {
+    customerName: "Анна",
+    customerPhone: "+375 (29) 555-20-30",
+    contactMethod: "phone",
+    fulfillmentMethod: "pickup",
+    productSlug: "shirt",
+    color: "white",
+    size: "m",
+    printMethodSlug: "dtf",
+    printFormatCode: "A4",
+    placement: "center",
+    quantity: 20,
+    design: { front: [] },
+  };
+
+  const parsed = parseCreateOrderInput({
+    ...baseOrder,
+    sizeDistribution: [{ size: "S", quantity: 5 }, { size: "M", quantity: 15 }],
+  });
+  assert.deepEqual(parsed.sizeDistribution, [{ size: "s", quantity: 5 }, { size: "m", quantity: 15 }]);
+
+  for (const sizeDistribution of [
+    [{ size: "M", quantity: 10 }, { size: "m", quantity: 10 }],
+    [{ size: "M", quantity: 0 }, { size: "L", quantity: 20 }],
+    [{ size: "M", quantity: 19 }],
+  ]) {
+    assert.throws(
+      () => parseCreateOrderInput({ ...baseOrder, sizeDistribution }),
+      (error) => error instanceof OrderInputError && error.field === "sizeDistribution",
+    );
+  }
+});
+
+test("order design is normalized and rejects markup injection", () => {
+  const baseOrder = {
+    customerName: "Анна",
+    customerPhone: "+375 (29) 555-20-30",
+    contactMethod: "phone",
+    fulfillmentMethod: "pickup",
+    productSlug: "shirt",
+    color: "white",
+    size: "m",
+    printMethodSlug: "dtf",
+    printFormatCode: "A4",
+    placement: "center",
+    quantity: 20,
+  };
+  const element = {
+    id: "shape-1",
+    type: "shape",
+    name: "Звезда",
+    content: "star",
+    color: "#AABBCC",
+    x: 50,
+    y: 50,
+    scale: 1,
+    rotation: 0,
+    width: 35,
+  };
+
+  const parsed = parseCreateOrderInput({ ...baseOrder, design: { front: [element] } });
+  assert.equal(parsed.design.front[0].color, "#aabbcc");
+  assert.equal(parsed.design.front[0].content, "star");
+
+  assert.throws(
+    () => parseCreateOrderInput({
+      ...baseOrder,
+      design: { front: [{ ...element, color: '\"><image href="x" onerror="alert(1)' }] },
+    }),
+    (error) => error instanceof OrderInputError && error.field === "design",
+  );
+  assert.throws(
+    () => parseCreateOrderInput({ ...baseOrder, design: { profile: [element] } }),
+    (error) => error instanceof OrderInputError && error.field === "design",
+  );
+});
+
+test("admin order preview does not inject saved design markup into HTML", async () => {
+  const orderDetail = await readFile(new URL("../app/admin/(protected)/orders/[id]/order-detail.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(orderDetail, /dangerouslySetInnerHTML/);
+  assert.match(orderDetail, /safeDesignColor/);
+  assert.match(orderDetail, /designElementId/);
 });
 
 test("server quote calculation uses authoritative prices and quantity discount", () => {

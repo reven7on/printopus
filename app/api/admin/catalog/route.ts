@@ -11,6 +11,7 @@ import { database } from "../../../../lib/db";
 export const runtime = "nodejs";
 
 type CatalogResource = "product" | "option" | "printMethod" | "printFormat" | "productPrintMethod" | "productPrintFormat" | "discount";
+const catalogResources: CatalogResource[] = ["product", "option", "printMethod", "printFormat", "productPrintMethod", "productPrintFormat", "discount"];
 
 function asRecord(value: unknown): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("INVALID_INPUT");
@@ -59,6 +60,11 @@ function integer(value: unknown, min: number, max: number) {
   return result;
 }
 
+function optionalInteger(value: unknown, min: number, max: number) {
+  if (value === null || value === "") return null;
+  return integer(value, min, max);
+}
+
 function boolean(value: unknown) {
   if (typeof value !== "boolean") throw new Error("INVALID_INPUT");
   return value;
@@ -76,6 +82,7 @@ function serializeCatalog(data: Awaited<ReturnType<typeof loadCatalog>>) {
         slug: productMethod.printMethod.slug,
         name: productMethod.printMethod.name,
         description: productMethod.printMethod.description,
+        recommendedFromQuantity: productMethod.printMethod.recommendedFromQuantity,
         priceDelta: Number(productMethod.priceDelta),
         active: productMethod.active,
         sortOrder: productMethod.sortOrder,
@@ -153,6 +160,7 @@ function getUpdate(resource: CatalogResource, raw: Record<string, unknown>) {
     ...(raw.name !== undefined ? { name: text(raw.name, 2, 100) } : {}),
     ...(raw.description !== undefined ? { description: optionalText(raw.description, 500) } : {}),
     ...(raw.priceDelta !== undefined ? { priceDelta: number(raw.priceDelta, 0, 100_000) } : {}),
+    ...(raw.recommendedFromQuantity !== undefined ? { recommendedFromQuantity: optionalInteger(raw.recommendedFromQuantity, 2, 1_000_000) } : {}),
     ...(raw.active !== undefined ? { active: boolean(raw.active) } : {}),
     ...(raw.sortOrder !== undefined ? { sortOrder: integer(raw.sortOrder, 0, 10_000) } : {}),
   };
@@ -175,36 +183,68 @@ function getUpdate(resource: CatalogResource, raw: Record<string, unknown>) {
   };
 }
 
+type ParsedCatalogUpdate = {
+  resource: CatalogResource;
+  id: string;
+  rawChanges: Record<string, unknown>;
+};
+
+function parseCatalogUpdate(value: unknown): ParsedCatalogUpdate {
+  const update = asRecord(value);
+  const resource = text(update.resource, 1, 32) as CatalogResource;
+  if (!catalogResources.includes(resource)) throw new Error("INVALID_INPUT");
+  const id = text(update.id, 1, 100);
+  const rawChanges = asRecord(update.changes);
+  const changes = getUpdate(resource, rawChanges);
+  if (!Object.keys(changes).length) throw new Error("INVALID_INPUT");
+  return { resource, id, rawChanges };
+}
+
+async function applyCatalogUpdate(
+  transaction: Prisma.TransactionClient,
+  update: ParsedCatalogUpdate,
+  actor: string,
+) {
+  const { resource, id, rawChanges } = update;
+  const changes = getUpdate(resource, rawChanges);
+  const updated = resource === "product"
+    ? await transaction.product.update({ where: { id }, data: changes })
+    : resource === "option"
+      ? await transaction.productOption.update({ where: { id }, data: changes })
+      : resource === "printMethod"
+        ? await transaction.printMethod.update({ where: { id }, data: changes })
+        : resource === "printFormat"
+          ? await transaction.printFormat.update({ where: { id }, data: changes })
+          : resource === "productPrintMethod"
+            ? await transaction.productPrintMethod.update({ where: { id }, data: changes })
+            : resource === "productPrintFormat"
+              ? await transaction.productPrintFormat.update({ where: { id }, data: changes })
+              : await transaction.volumeDiscount.update({ where: { id }, data: changes });
+  await writeAuditLog({ actor, action: "updated", entity: resource, entityId: id, details: changes }, transaction);
+  return updated;
+}
+
 export async function PATCH(request: Request) {
   const auth = await authorizeAdminRequest(request, true);
   if ("response" in auth) return auth.response;
 
   try {
     const body = asRecord(await readAdminJson(request));
-    const resource = text(body.resource, 1, 32) as CatalogResource;
-    if (!["product", "option", "printMethod", "printFormat", "productPrintMethod", "productPrintFormat", "discount"].includes(resource)) throw new Error("INVALID_INPUT");
-    const id = text(body.id, 1, 100);
-    const changes = getUpdate(resource, asRecord(body.changes));
-    if (!Object.keys(changes).length) throw new Error("INVALID_INPUT");
+    if (body.updates !== undefined) {
+      if (!Array.isArray(body.updates) || body.updates.length < 1 || body.updates.length > 100) throw new Error("INVALID_INPUT");
+      const updates = body.updates.map(parseCatalogUpdate);
+      const uniqueTargets = new Set(updates.map(({ resource, id }) => `${resource}:${id}`));
+      if (uniqueTargets.size !== updates.length) throw new Error("INVALID_INPUT");
+      const items = await database.$transaction(async (transaction) => {
+        const results = [];
+        for (const update of updates) results.push(await applyCatalogUpdate(transaction, update, auth.identity.username));
+        return results;
+      });
+      return Response.json({ items, updated: items.length });
+    }
 
-    const result = await database.$transaction(async (transaction) => {
-      const updated = resource === "product"
-        ? await transaction.product.update({ where: { id }, data: changes })
-        : resource === "option"
-          ? await transaction.productOption.update({ where: { id }, data: changes })
-          : resource === "printMethod"
-            ? await transaction.printMethod.update({ where: { id }, data: changes })
-            : resource === "printFormat"
-              ? await transaction.printFormat.update({ where: { id }, data: changes })
-              : resource === "productPrintMethod"
-                ? await transaction.productPrintMethod.update({ where: { id }, data: changes })
-                : resource === "productPrintFormat"
-                  ? await transaction.productPrintFormat.update({ where: { id }, data: changes })
-              : await transaction.volumeDiscount.update({ where: { id }, data: changes });
-      await writeAuditLog({ actor: auth.identity.username, action: "updated", entity: resource, entityId: id, details: changes }, transaction);
-      return updated;
-    });
-
+    const update = parseCatalogUpdate(body);
+    const result = await database.$transaction((transaction) => applyCatalogUpdate(transaction, update, auth.identity.username));
     return Response.json({ item: result });
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
@@ -261,6 +301,7 @@ export async function POST(request: Request) {
             name: text(data.name, 2, 100),
             description: optionalText(data.description ?? null, 500),
             priceDelta: number(data.priceDelta, 0, 100_000),
+            recommendedFromQuantity: optionalInteger(data.recommendedFromQuantity ?? null, 2, 1_000_000),
           } })
           : resource === "printFormat"
             ? await transaction.printFormat.create({ data: {

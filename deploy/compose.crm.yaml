@@ -1,0 +1,84 @@
+# Optional, separate CRM project. It may be stopped without affecting either
+# Printopus stack. Use only after the website workflow is stable.
+services:
+  database:
+    image: ${MARIADB_IMAGE:-mariadb:11.8.9-noble}
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: ${ESPOCRM_DATABASE_NAME:-espocrm}
+      MARIADB_USER: ${ESPOCRM_DATABASE_USER:-espocrm}
+      MARIADB_PASSWORD: ${ESPOCRM_DATABASE_PASSWORD:?ESPOCRM_DATABASE_PASSWORD is required}
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:?MARIADB_ROOT_PASSWORD is required}
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - mariadb_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mariadb-admin ping -h localhost -u root -p$$MARIADB_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks: [backend]
+    logging: &local_logging
+      driver: local
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  app:
+    image: ${ESPOCRM_IMAGE:-espocrm/espocrm:10.0.8}
+    restart: unless-stopped
+    environment: &espocrm_environment
+      ESPOCRM_DATABASE_PLATFORM: Mysql
+      ESPOCRM_DATABASE_HOST: database
+      ESPOCRM_DATABASE_NAME: ${ESPOCRM_DATABASE_NAME:-espocrm}
+      ESPOCRM_DATABASE_USER: ${ESPOCRM_DATABASE_USER:-espocrm}
+      ESPOCRM_DATABASE_PASSWORD: ${ESPOCRM_DATABASE_PASSWORD:?ESPOCRM_DATABASE_PASSWORD is required}
+      ESPOCRM_SITE_URL: ${ESPOCRM_SITE_URL:?ESPOCRM_SITE_URL is required}
+      ESPOCRM_ADMIN_USERNAME: ${ESPOCRM_ADMIN_USERNAME:?ESPOCRM_ADMIN_USERNAME is required}
+      ESPOCRM_ADMIN_PASSWORD: ${ESPOCRM_ADMIN_PASSWORD:?ESPOCRM_ADMIN_PASSWORD is required}
+    volumes:
+      - espocrm_data:/var/www/html/data
+      - espocrm_custom:/var/www/html/custom
+      - espocrm_custom_client:/var/www/html/client/custom
+    depends_on:
+      database:
+        condition: service_healthy
+    networks:
+      backend:
+      edge:
+        aliases: [printopus-crm-app]
+    healthcheck:
+      test: ["CMD", "bin/command", "app-check"]
+      start_period: 20s
+      interval: 60s
+      timeout: 20s
+      retries: 3
+    logging: *local_logging
+
+  daemon:
+    image: ${ESPOCRM_IMAGE:-espocrm/espocrm:10.0.8}
+    restart: unless-stopped
+    entrypoint: docker-daemon.sh
+    environment: *espocrm_environment
+    volumes:
+      - espocrm_data:/var/www/html/data
+      - espocrm_custom:/var/www/html/custom
+      - espocrm_custom_client:/var/www/html/client/custom
+    depends_on:
+      app:
+        condition: service_healthy
+    networks: [backend]
+    logging: *local_logging
+
+networks:
+  backend:
+    internal: true
+  edge:
+    name: ${EDGE_NETWORK:-printopus-edge}
+    external: true
+
+volumes:
+  mariadb_data:
+  espocrm_data:
+  espocrm_custom:
+  espocrm_custom_client:

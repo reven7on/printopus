@@ -1,0 +1,114 @@
+# Run this file independently in /srv/printopus/staging and
+# /srv/printopus/production. It intentionally contains no build directives:
+# a VPS only pulls already published, immutable images.
+services:
+  database:
+    image: postgres:17.11-alpine3.24
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: printopus
+      POSTGRES_USER: printopus
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U printopus -d printopus"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks: [backend]
+    logging: &local_logging
+      driver: local
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  migrations:
+    image: ${DOCKERHUB_NAMESPACE:?DOCKERHUB_NAMESPACE is required}/printopus-migrations:${IMAGE_TAG:?IMAGE_TAG is required}
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+    depends_on:
+      database:
+        condition: service_healthy
+    networks: [backend]
+    logging: *local_logging
+
+  app:
+    image: ${DOCKERHUB_NAMESPACE:?DOCKERHUB_NAMESPACE is required}/printopus-app:${IMAGE_TAG:?IMAGE_TAG is required}
+    restart: unless-stopped
+    # Next.js recommends 10-30 seconds so in-flight requests and after()
+    # callbacks can finish during a rolling replacement.
+    stop_grace_period: 30s
+    environment:
+      NODE_ENV: production
+      DEPLOY_ENV: ${DEPLOYMENT_ENV:?DEPLOYMENT_ENV is required}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      SITE_URL: ${SITE_URL:?SITE_URL is required}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:?ADMIN_USERNAME is required}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD is required}
+      ADMIN_SESSION_SECRET: ${ADMIN_SESSION_SECRET:?ADMIN_SESSION_SECRET is required}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?TELEGRAM_BOT_TOKEN is required}
+      TELEGRAM_ADMIN_CHAT_ID: ${TELEGRAM_ADMIN_CHAT_ID:?TELEGRAM_ADMIN_CHAT_ID is required}
+      TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:?TELEGRAM_WEBHOOK_SECRET is required}
+      TELEGRAM_MANAGER_USER_IDS: ${TELEGRAM_MANAGER_USER_IDS:-}
+      UPLOAD_DIR: /var/lib/printopus/uploads
+      UPLOAD_MIN_FREE_BYTES: ${UPLOAD_MIN_FREE_BYTES:-1073741824}
+    volumes:
+      - ${UPLOADS_PATH:?UPLOADS_PATH is required}:/var/lib/printopus/uploads
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    depends_on:
+      database:
+        condition: service_healthy
+    networks:
+      backend:
+      edge:
+        aliases:
+          - printopus-${DEPLOYMENT_ENV:?DEPLOYMENT_ENV is required}-app
+    logging: *local_logging
+
+  telegram-webhook:
+    image: ${DOCKERHUB_NAMESPACE:?DOCKERHUB_NAMESPACE is required}/printopus-telegram-setup:${IMAGE_TAG:?IMAGE_TAG is required}
+    environment:
+      SITE_URL: ${SITE_URL:?SITE_URL is required}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?TELEGRAM_BOT_TOKEN is required}
+      TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:?TELEGRAM_WEBHOOK_SECRET is required}
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: "no"
+    networks: [backend, edge]
+    logging: *local_logging
+
+  telegram-worker:
+    image: ${DOCKERHUB_NAMESPACE:?DOCKERHUB_NAMESPACE is required}/printopus-telegram-worker:${IMAGE_TAG:?IMAGE_TAG is required}
+    restart: unless-stopped
+    stop_grace_period: 15s
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      SITE_URL: ${SITE_URL:?SITE_URL is required}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?TELEGRAM_BOT_TOKEN is required}
+      TELEGRAM_ADMIN_CHAT_ID: ${TELEGRAM_ADMIN_CHAT_ID:?TELEGRAM_ADMIN_CHAT_ID is required}
+      UPLOAD_DIR: /var/lib/printopus/uploads
+    volumes:
+      - ${UPLOADS_PATH:?UPLOADS_PATH is required}:/var/lib/printopus/uploads:ro
+    depends_on:
+      database:
+        condition: service_healthy
+    networks: [backend, edge]
+    logging: *local_logging
+
+networks:
+  backend:
+    internal: true
+  edge:
+    name: ${EDGE_NETWORK:-printopus-edge}
+    external: true
+
+volumes:
+  postgres_data:

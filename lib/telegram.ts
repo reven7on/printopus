@@ -1,4 +1,5 @@
-import { SITE_URL } from "../app/site-config.ts";
+import { getSiteUrl } from "../app/site-config.ts";
+import type { OrderSizeBreakdownEntry } from "./order-size-breakdown.ts";
 
 export interface TelegramOrderPayload {
   id: string;
@@ -19,6 +20,7 @@ export interface TelegramOrderPayload {
     productName: string;
     colorLabel?: string | null;
     sizeLabel?: string | null;
+    sizeBreakdown?: OrderSizeBreakdownEntry[] | null;
     placement?: string | null;
     quantity: number;
     baseUnitPrice: number;
@@ -47,6 +49,31 @@ export interface TelegramOrderPayload {
   }>;
 }
 
+interface TelegramApiResponse<T> {
+  ok: boolean;
+  result?: T;
+  description?: string;
+  error_code?: number;
+  parameters?: { retry_after?: number };
+}
+
+export interface TelegramSentMessage {
+  chatId: string;
+  messageId: number;
+}
+
+export class TelegramApiError extends Error {
+  readonly status: number;
+  readonly errorCode?: number;
+
+  constructor(message: string, status: number, errorCode?: number) {
+    super(message);
+    this.name = "TelegramApiError";
+    this.status = status;
+    this.errorCode = errorCode;
+  }
+}
+
 const STATUS_LABELS: Record<string, string> = {
   NEW: "🔴 Новый заказ",
   CONFIRMED: "🟡 Подтвержден",
@@ -56,9 +83,11 @@ const STATUS_LABELS: Record<string, string> = {
   CANCELLED: "❌ Отменен",
 };
 
-/**
- * Escapes special HTML characters for Telegram HTML parse mode
- */
+const MAX_TELEGRAM_TEXT_LENGTH = 4096;
+const TELEGRAM_TEXT_TARGET_LENGTH = 3900;
+const DEFAULT_TIMEOUT_MS = 8_000;
+const DEFAULT_ATTEMPTS = 3;
+
 export function escapeTgHtml(str: string): string {
   return str
     .replace(/&/g, "&amp;")
@@ -66,287 +95,290 @@ export function escapeTgHtml(str: string): string {
     .replace(/>/g, "&gt;");
 }
 
-/**
- * Format order into clean, professional HTML message for Telegram
- */
+function limitText(value: string, maximum: number): string {
+  const characters = Array.from(value.trim());
+  return characters.length <= maximum ? characters.join("") : `${characters.slice(0, maximum - 1).join("")}…`;
+}
+
+function formatCompactOrderHtml(order: TelegramOrderPayload): string {
+  const statusBadge = STATUS_LABELS[order.status] ?? escapeTgHtml(order.status);
+  const lines = [
+    `<b>👕 ЗАКАЗ #${escapeTgHtml(limitText(order.orderNumber, 80))}</b>`,
+    `<b>Статус:</b> ${statusBadge}`,
+    "",
+    `<b>👤 Клиент:</b> ${escapeTgHtml(limitText(order.customerName, 160))}`,
+    `<b>📱 Телефон:</b> <code>${escapeTgHtml(limitText(order.customerPhone, 40))}</code>`,
+    `<b>📋 Позиций:</b> ${order.items.length}`,
+    `<b>💰 ИТОГО: ${order.total.toFixed(2)} BYN</b>`,
+    "",
+    "Полные данные и макеты доступны в админке.",
+  ];
+  return lines.join("\n");
+}
+
 export function formatOrderNotificationHtml(order: TelegramOrderPayload): string {
-  const statusBadge = STATUS_LABELS[order.status] ?? order.status;
+  const statusBadge = STATUS_LABELS[order.status] ?? escapeTgHtml(order.status);
   const contactIcon = order.contactMethod.toUpperCase() === "TELEGRAM" ? "✈️ Telegram" : "📞 Телефон";
   const fulfillmentIcon = order.fulfillmentMethod.toUpperCase() === "DELIVERY" ? "🚚 Доставка" : "🏪 Самовывоз";
 
-  let html = `<b>👕 ЗАКАЗ #${escapeTgHtml(order.orderNumber)}</b>\n`;
+  let html = `<b>👕 ЗАКАЗ #${escapeTgHtml(limitText(order.orderNumber, 80))}</b>\n`;
   html += `<b>Статус:</b> ${statusBadge}\n\n`;
-
-  html += `<b>👤 Клиент:</b> ${escapeTgHtml(order.customerName)}\n`;
-  html += `<b>📱 Связь:</b> <code>${escapeTgHtml(order.customerPhone)}</code> (${contactIcon})\n`;
+  html += `<b>👤 Клиент:</b> ${escapeTgHtml(limitText(order.customerName, 160))}\n`;
+  html += `<b>📱 Связь:</b> <code>${escapeTgHtml(limitText(order.customerPhone, 40))}</code> (${contactIcon})\n`;
   html += `<b>📦 Способ получения:</b> ${fulfillmentIcon}\n`;
 
   if (order.deliveryAddress) {
-    html += `<b>📍 Адрес:</b> ${escapeTgHtml(order.deliveryAddress)}\n`;
+    html += `<b>📍 Адрес:</b> ${escapeTgHtml(limitText(order.deliveryAddress, 300))}\n`;
   }
   if (order.comment) {
-    html += `<b>💬 Комментарий:</b> <i>"${escapeTgHtml(order.comment)}"</i>\n`;
+    html += `<b>💬 Комментарий:</b> <i>"${escapeTgHtml(limitText(order.comment, 500))}"</i>\n`;
   }
 
   html += `\n<b>📋 Состав заказа:</b>\n`;
-  order.items.forEach((item, index) => {
-    html += `\n<b>${index + 1}. ${escapeTgHtml(item.productName)}</b>\n`;
-    if (item.colorLabel) html += `   • Цвет: ${escapeTgHtml(item.colorLabel)}\n`;
-    if (item.sizeLabel) html += `   • Размер: ${escapeTgHtml(item.sizeLabel)}\n`;
-    if (item.placement) html += `   • Нанесение: ${escapeTgHtml(item.placement)}\n`;
+  order.items.slice(0, 20).forEach((item, index) => {
+    html += `\n<b>${index + 1}. ${escapeTgHtml(limitText(item.productName, 160))}</b>\n`;
+    if (item.colorLabel) html += `   • Цвет: ${escapeTgHtml(limitText(item.colorLabel, 80))}\n`;
+    if (item.sizeBreakdown?.length) {
+      const breakdown = item.sizeBreakdown
+        .map((entry) => `${escapeTgHtml(limitText(entry.label, 24))} — ${entry.quantity}`)
+        .join(", ");
+      html += `   • Размеры: ${breakdown}\n`;
+    } else if (item.sizeLabel) {
+      html += `   • Размер: ${escapeTgHtml(limitText(item.sizeLabel, 40))}\n`;
+    }
+    if (item.placement) html += `   • Нанесение: ${escapeTgHtml(limitText(item.placement, 100))}\n`;
     html += `   • Тираж: <b>${item.quantity} шт.</b> (${item.unitPrice.toFixed(2)} BYN/шт)\n`;
 
     if (item.textElements && item.textElements.length > 0) {
       html += `   • ✍️ <b>Текст надписей:</b>\n`;
-      item.textElements.forEach((txt) => {
-        const fontInfo = txt.fontFamily ? ` (Шрифт: ${escapeTgHtml(txt.fontFamily)}, цвет: ${escapeTgHtml(txt.color ?? "стандартный")})` : "";
-        html += `     - <i>"${escapeTgHtml(txt.content)}"</i>${fontInfo}\n`;
+      item.textElements.slice(0, 12).forEach((txt) => {
+        const fontInfo = txt.fontFamily
+          ? ` (Шрифт: ${escapeTgHtml(limitText(txt.fontFamily, 80))}, цвет: ${escapeTgHtml(limitText(txt.color ?? "стандартный", 40))})`
+          : "";
+        html += `     - <i>"${escapeTgHtml(limitText(txt.content, 160))}"</i>${fontInfo}\n`;
       });
     }
 
-    if (item.assets && item.assets.length > 0) {
-      html += `   • 📁 <b>Исходники принта (${item.assets.length} ф.):</b> прикреплены отдельными файлами ниже ⬇️\n`;
+    if (
+      (item.assets && item.assets.length > 0)
+      || (item.textElements && item.textElements.length > 0)
+      || (item.shapeElements && item.shapeElements.length > 0)
+    ) {
+      html += `   • 📁 <b>Макеты и исходники:</b> доступны в админке; превью могут быть приложены ниже.\n`;
     }
   });
 
   html += `\n<b>💰 Финансы:</b>\n`;
   html += `   • Сумма без скидки: ${order.subtotal.toFixed(2)} BYN\n`;
-  if (order.discountPercent > 0) {
-    html += `   • Оптовая скидка: <b>-${order.discountPercent}%</b>\n`;
-  }
+  if (order.discountPercent > 0) html += `   • Оптовая скидка: <b>-${order.discountPercent}%</b>\n`;
   html += `   • <b>ИТОГО К ОПЛАТЕ: ${order.total.toFixed(2)} BYN</b>\n`;
 
-  return html;
+  return html.length <= TELEGRAM_TEXT_TARGET_LENGTH ? html : formatCompactOrderHtml(order);
 }
 
-/**
- * Build inline keyboard buttons for manager order management
- */
 export function buildOrderInlineKeyboard(orderId: string, currentStatus: string) {
-  const buttons = [];
+  const buttons: Array<Array<{ text: string; callback_data?: string; url?: string }>> = [];
 
   if (currentStatus === "NEW") {
     buttons.push([
-      { text: "✅ Принять в работу", callback_data: `st:IN_PRODUCTION:${orderId}` },
+      { text: "✅ Подтвердить заказ", callback_data: `st:CONFIRMED:${orderId}` },
       { text: "❌ Отклонить", callback_data: `st:CANCELLED:${orderId}` },
     ]);
-  } else if (currentStatus === "IN_PRODUCTION" || currentStatus === "CONFIRMED") {
-    buttons.push([
-      { text: "📦 Готов к выдаче", callback_data: `st:READY:${orderId}` },
-    ]);
+  } else if (currentStatus === "CONFIRMED") {
+    buttons.push([{ text: "✅ Принять в работу", callback_data: `st:IN_PRODUCTION:${orderId}` }]);
+  } else if (currentStatus === "IN_PRODUCTION") {
+    buttons.push([{ text: "📦 Готов к выдаче", callback_data: `st:READY:${orderId}` }]);
   } else if (currentStatus === "READY") {
-    buttons.push([
-      { text: "🎉 Завершен", callback_data: `st:COMPLETED:${orderId}` },
-    ]);
+    buttons.push([{ text: "🎉 Завершен", callback_data: `st:COMPLETED:${orderId}` }]);
   }
 
-  // Admin link button
-  buttons.push([
-    { text: "🔗 Открыть в админке", url: `${SITE_URL}/admin` },
-  ]);
-
+  buttons.push([{ text: "🔗 Открыть в админке", url: `${getSiteUrl()}/admin/orders/${encodeURIComponent(orderId)}` }]);
   return { inline_keyboard: buttons };
 }
 
-/**
- * Send order notification to Telegram admin chat (with photo preview if available)
- */
-export async function sendOrderNotificationToTelegram(order: TelegramOrderPayload): Promise<boolean> {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
-  const chatId = process.env.TELEGRAM_ADMIN_CHAT_ID;
+function delay(milliseconds: number) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
 
-  if (!token || !chatId) {
-    console.log("[Telegram Bot] TELEGRAM_BOT_TOKEN or TELEGRAM_ADMIN_CHAT_ID is missing. Skipping notification.");
-    return false;
-  }
+function getTelegramToken(): string | null {
+  return process.env.TELEGRAM_BOT_TOKEN?.trim() || null;
+}
 
-  const text = formatOrderNotificationHtml(order);
-  const reply_markup = buildOrderInlineKeyboard(order.id, order.status);
+async function telegramApi<T>(
+  method: string,
+  body: Record<string, unknown> | FormData,
+  options: { attempts?: number; timeoutMs?: number } = {},
+): Promise<T> {
+  const token = getTelegramToken();
+  if (!token) throw new TelegramApiError("TELEGRAM_BOT_TOKEN is not configured", 503);
 
-  // 1. Always send the main order text message FIRST so the notification starts with "👕 ЗАКАЗ #BY-..."
-  let messageSent = false;
-  try {
-    const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text,
-        parse_mode: "HTML",
-        reply_markup,
-        disable_web_page_preview: true,
-      }),
-    });
+  const attempts = options.attempts ?? DEFAULT_ATTEMPTS;
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  let lastError: unknown;
 
-    const data = (await response.json()) as { ok: boolean; result?: { message_id: number }; description?: string };
-    if (data.ok) {
-      messageSent = true;
-      console.log(`[Telegram Bot] Order #${order.orderNumber} main text notification sent (message_id: ${data.result?.message_id})`);
-    } else {
-      console.error("[Telegram Bot] Failed to send text notification:", data.description);
-      return false;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const isFormData = body instanceof FormData;
+      const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+        method: "POST",
+        headers: isFormData ? undefined : { "Content-Type": "application/json" },
+        body: isFormData ? body : JSON.stringify(body),
+        signal: controller.signal,
+      });
+      const data = await response.json().catch(() => null) as TelegramApiResponse<T> | null;
+      if (response.ok && data?.ok && data.result !== undefined) return data.result;
+
+      const error = new TelegramApiError(
+        data?.description || `Telegram API ${method} returned HTTP ${response.status}`,
+        response.status,
+        data?.error_code,
+      );
+      const retryAfterMs = Math.max(0, data?.parameters?.retry_after ?? 0) * 1_000;
+      const retryable = response.status === 429 || response.status >= 500;
+      if (!retryable || attempt === attempts) throw error;
+      await delay(retryAfterMs || 250 * 2 ** (attempt - 1));
+    } catch (error) {
+      lastError = error;
+      if (error instanceof TelegramApiError) throw error;
+      if (attempt === attempts) {
+        const message = error instanceof Error ? error.message : "Unknown network error";
+        throw new TelegramApiError(`Telegram API ${method} network error: ${message}`, 503);
+      }
+      await delay(250 * 2 ** (attempt - 1));
+    } finally {
+      clearTimeout(timeout);
     }
-  } catch (error) {
-    console.error("[Telegram Bot] Exception sending text notification:", error);
-    return false;
   }
 
-  // 2. Send mockup photos below the main text message
-  const photos = order.previewBuffers && order.previewBuffers.length > 0
+  throw lastError instanceof Error ? lastError : new TelegramApiError("Telegram API request failed", 503);
+}
+
+export async function sendOrderNotificationToTelegram(order: TelegramOrderPayload): Promise<TelegramSentMessage | null> {
+  const chatId = process.env.TELEGRAM_ADMIN_CHAT_ID?.trim();
+  if (!getTelegramToken() || !chatId) {
+    console.info("[Telegram Bot] Notification is disabled: bot token or admin chat ID is missing.");
+    return null;
+  }
+
+  const result = await telegramApi<{ message_id: number }>("sendMessage", {
+    chat_id: chatId,
+    text: formatOrderNotificationHtml(order),
+    parse_mode: "HTML",
+    reply_markup: buildOrderInlineKeyboard(order.id, order.status),
+    link_preview_options: { is_disabled: true },
+  });
+  return { chatId, messageId: result.message_id };
+}
+
+export async function sendOrderPreviewPhotosToTelegram(order: TelegramOrderPayload): Promise<void> {
+  const chatId = process.env.TELEGRAM_ADMIN_CHAT_ID?.trim();
+  if (!getTelegramToken() || !chatId) return;
+  const photos = order.previewBuffers?.length
     ? order.previewBuffers
-    : order.previewBuffer && order.previewBuffer.length > 0
+    : order.previewBuffer?.length
       ? [{ name: "Спереди", buffer: order.previewBuffer }]
       : [];
 
-  for (let i = 0; i < photos.length; i++) {
-    const photo = photos[i];
-    const photoName = photo.name ?? `Вид ${i + 1}`;
+  for (let index = 0; index < photos.length; index += 1) {
+    const photo = photos[index];
+    const formData = new FormData();
+    formData.append("chat_id", chatId);
+    formData.append("photo", new Blob([new Uint8Array(photo.buffer)], { type: "image/png" }), `mockup_${order.orderNumber}_${index}.png`);
+    formData.append("caption", `🖼️ <b>Макет (${escapeTgHtml(limitText(photo.name ?? `Вид ${index + 1}`, 100))})</b> к заказу #${escapeTgHtml(order.orderNumber)}`);
+    formData.append("parse_mode", "HTML");
     try {
-      const formData = new FormData();
-      formData.append("chat_id", chatId);
-      formData.append(
-        "photo",
-        new Blob([new Uint8Array(photo.buffer)], { type: "image/png" }),
-        `mockup_${order.orderNumber}_${i}.png`,
-      );
-      formData.append("caption", `🖼️ <b>Макет (${escapeTgHtml(photoName)})</b> к заказу #${escapeTgHtml(order.orderNumber)}`);
-      formData.append("parse_mode", "HTML");
-
-      await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, {
-        method: "POST",
-        body: formData,
-      });
-    } catch (photoErr) {
-      console.warn("[Telegram Bot] Exception sending mockup photo:", photoErr);
+      await telegramApi("sendPhoto", formData);
+    } catch (error) {
+      console.error(`[Telegram Bot] Failed to send preview ${index + 1}:`, error);
     }
   }
-
-  return messageSent;
 }
 
-/**
- * Answer callback query from Telegram inline button click
- */
-export async function answerCallbackQuery(callbackQueryId: string, text: string): Promise<void> {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
-  if (!token) return;
-
-  try {
-    await fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        callback_query_id: callbackQueryId,
-        text,
-        show_alert: false,
-      }),
-    });
-  } catch (err) {
-    console.error("[Telegram Bot] Failed to answer callback query:", err);
-  }
+export async function answerCallbackQuery(
+  callbackQueryId: string,
+  text: string,
+  showAlert = false,
+): Promise<void> {
+  await telegramApi("answerCallbackQuery", {
+    callback_query_id: callbackQueryId,
+    text: limitText(text, 180),
+    show_alert: showAlert,
+  }, { attempts: 2, timeoutMs: 3_000 });
 }
 
-/**
- * Edit message text / caption & markup when order status changes via Telegram button
- */
+export async function sendTelegramStatusNotice(chatId: number | string, messageId: number, text: string): Promise<void> {
+  await telegramApi("sendMessage", {
+    chat_id: chatId,
+    text: limitText(text, 500),
+    reply_parameters: { message_id: messageId, allow_sending_without_reply: true },
+  });
+}
+
 export async function updateTelegramMessageStatus(
   chatId: number | string,
   messageId: number,
   order: TelegramOrderPayload,
 ): Promise<void> {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
-  if (!token) return;
-
+  if (!getTelegramToken()) throw new TelegramApiError("TELEGRAM_BOT_TOKEN is not configured", 503);
   const text = formatOrderNotificationHtml(order);
-  const reply_markup = buildOrderInlineKeyboard(order.id, order.status);
+  const replyMarkup = buildOrderInlineKeyboard(order.id, order.status);
 
-  // Try editMessageText first (since main order message is text)
   try {
-    const textResponse = await fetch(`https://api.telegram.org/bot${token}/editMessageText`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: chatId,
-        message_id: messageId,
-        text,
-        parse_mode: "HTML",
-        reply_markup,
-        disable_web_page_preview: true,
-      }),
+    await telegramApi("editMessageText", {
+      chat_id: chatId,
+      message_id: messageId,
+      text,
+      parse_mode: "HTML",
+      reply_markup: replyMarkup,
+      link_preview_options: { is_disabled: true },
     });
-    const textData = (await textResponse.json()) as { ok: boolean; description?: string };
-    if (textData.ok) {
-      console.log(`[Telegram Bot] Successfully updated message #${messageId} text to status ${order.status}`);
-      return;
-    }
-    console.warn(`[Telegram Bot] editMessageText returned ok:false (${textData.description}), trying editMessageCaption`);
-  } catch (textErr) {
-    console.warn("[Telegram Bot] Exception in editMessageText:", textErr);
+    return;
+  } catch (error) {
+    if (error instanceof TelegramApiError && error.message.toLowerCase().includes("message is not modified")) return;
+    const canBeCaption = error instanceof TelegramApiError
+      && error.status === 400
+      && /no text|caption|message to edit/i.test(error.message);
+    if (!canBeCaption) throw error;
   }
 
-  // Fallback to editMessageCaption in case original message was a photo caption
   try {
-    const captionResponse = await fetch(`https://api.telegram.org/bot${token}/editMessageCaption`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: chatId,
-        message_id: messageId,
-        caption: text,
-        parse_mode: "HTML",
-        reply_markup,
-      }),
+    const caption = text.length <= 1000 ? text : formatCompactOrderHtml(order);
+    await telegramApi("editMessageCaption", {
+      chat_id: chatId,
+      message_id: messageId,
+      caption,
+      parse_mode: "HTML",
+      reply_markup: replyMarkup,
     });
-    const captionData = (await captionResponse.json()) as { ok: boolean; description?: string };
-    if (captionData.ok) {
-      console.log(`[Telegram Bot] Successfully updated message #${messageId} caption to status ${order.status}`);
-    } else {
-      console.error(`[Telegram Bot] editMessageCaption failed: ${captionData.description}`);
-    }
-  } catch (captionErr) {
-    console.error("[Telegram Bot] Exception in editMessageCaption:", captionErr);
+  } catch (error) {
+    if (error instanceof TelegramApiError && error.message.toLowerCase().includes("message is not modified")) return;
+    throw error;
   }
 }
 
-/**
- * Send an attached document file (original print asset) to Telegram admin chat
- */
 export async function sendTelegramDocument(
   documentBuffer: Buffer | Uint8Array,
   fileName: string,
   caption?: string,
 ): Promise<boolean> {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
-  const chatId = process.env.TELEGRAM_ADMIN_CHAT_ID;
+  const chatId = process.env.TELEGRAM_ADMIN_CHAT_ID?.trim();
+  if (!getTelegramToken() || !chatId) return false;
 
-  if (!token || !chatId) return false;
+  const formData = new FormData();
+  formData.append("chat_id", chatId);
+  formData.append("disable_content_type_detection", "true");
+  formData.append("document", new Blob([new Uint8Array(documentBuffer)], { type: "application/octet-stream" }), fileName);
+  if (caption) formData.append("caption", limitText(caption, 1000));
 
   try {
-    const formData = new FormData();
-    formData.append("chat_id", chatId);
-    formData.append("disable_content_type_detection", "true");
-    formData.append(
-      "document",
-      new Blob([new Uint8Array(documentBuffer)], { type: "application/octet-stream" }),
-      fileName,
-    );
-    if (caption) {
-      formData.append("caption", caption);
-    }
-
-    const response = await fetch(`https://api.telegram.org/bot${token}/sendDocument`, {
-      method: "POST",
-      body: formData,
-    });
-
-    const data = (await response.json()) as { ok: boolean; description?: string };
-    if (!data.ok) {
-      console.error("[Telegram Bot] Failed to send document:", data.description);
-      return false;
-    }
+    await telegramApi("sendDocument", formData);
     return true;
   } catch (error) {
-    console.error("[Telegram Bot] Exception sending document:", error);
+    console.error("[Telegram Bot] Failed to send document:", error);
     return false;
   }
 }
+
+export const TELEGRAM_MESSAGE_LIMIT = MAX_TELEGRAM_TEXT_LENGTH;

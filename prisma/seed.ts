@@ -49,7 +49,6 @@ export async function seedCatalog(database: SeedDatabase) {
         description: item.description,
         basePrice: item.basePrice,
         sortOrder,
-        active: true,
       },
       create: {
         slug: item.slug,
@@ -65,7 +64,7 @@ export async function seedCatalog(database: SeedDatabase) {
       const details = colorDetails[color];
       await database.productOption.upsert({
         where: { productId_type_value: { productId: product.id, type: ProductOptionType.COLOR, value: color } },
-        update: { ...details, sortOrder: optionOrder, active: true },
+        update: { ...details, sortOrder: optionOrder },
         create: { productId: product.id, type: ProductOptionType.COLOR, value: color, ...details, sortOrder: optionOrder },
       });
     }
@@ -73,16 +72,16 @@ export async function seedCatalog(database: SeedDatabase) {
     for (const [optionOrder, size] of item.sizes.entries()) {
       await database.productOption.upsert({
         where: { productId_type_value: { productId: product.id, type: ProductOptionType.SIZE, value: size.toLowerCase() } },
-        update: { label: size, sortOrder: optionOrder, active: true },
+        update: { label: size, sortOrder: optionOrder },
         create: { productId: product.id, type: ProductOptionType.SIZE, value: size.toLowerCase(), label: size, sortOrder: optionOrder },
       });
     }
   }
 
   const printMethods = [
-    { slug: "dtf", name: "DTF-печать", description: "Полноцветные изображения и градиенты", priceDelta: 4, sortOrder: 0 },
-    { slug: "silk", name: "Шелкография", description: "Стойкая печать для средних и крупных тиражей", priceDelta: 3, sortOrder: 1 },
-    { slug: "embroidery", name: "Вышивка", description: "Фактурное нанесение для логотипов и надписей", priceDelta: 6, sortOrder: 2 },
+    { slug: "dtf", name: "DTF-печать", description: "Полноцветные изображения и градиенты", priceDelta: 4, recommendedFromQuantity: null, sortOrder: 0 },
+    { slug: "silk", name: "Шелкография", description: "Стойкая печать для средних и крупных тиражей", priceDelta: 3, recommendedFromQuantity: 30, sortOrder: 1 },
+    { slug: "embroidery", name: "Вышивка", description: "Фактурное нанесение для логотипов и надписей", priceDelta: 6, recommendedFromQuantity: null, sortOrder: 2 },
   ];
 
   for (const method of printMethods) {
@@ -92,7 +91,7 @@ export async function seedCatalog(database: SeedDatabase) {
   for (const [sortOrder, format] of PRINT_FORMATS.entries()) {
     await database.printFormat.upsert({
       where: { code: format.id },
-      update: { widthCm: format.width, heightCm: format.height, priceDelta: format.add, sortOrder, active: true },
+      update: { widthCm: format.width, heightCm: format.height, priceDelta: format.add, sortOrder },
       create: { code: format.id, widthCm: format.width, heightCm: format.height, priceDelta: format.add, sortOrder },
     });
   }
@@ -108,7 +107,7 @@ export async function seedCatalog(database: SeedDatabase) {
       if (product.slug === "cap" && !["dtf", "embroidery"].includes(method.slug)) continue;
       const productMethod = await database.productPrintMethod.upsert({
         where: { productId_printMethodId: { productId: product.id, printMethodId: method.id } },
-        update: { priceDelta: method.priceDelta, sortOrder: method.sortOrder, active: true },
+        update: { priceDelta: method.priceDelta, sortOrder: method.sortOrder },
         create: {
           productId: product.id,
           printMethodId: method.id,
@@ -131,7 +130,7 @@ export async function seedCatalog(database: SeedDatabase) {
               printFormatId: format.id,
             },
           },
-          update: { priceDelta: format.priceDelta, sortOrder: format.sortOrder, active: true },
+          update: { priceDelta: format.priceDelta, sortOrder: format.sortOrder },
           create: {
             productPrintMethodId: productMethod.id,
             printFormatId: format.id,
@@ -151,7 +150,7 @@ export async function seedCatalog(database: SeedDatabase) {
   ]) {
     await database.volumeDiscount.upsert({
       where: { minQuantity: discount.minQuantity },
-      update: { percent: discount.percent, active: true },
+      update: { percent: discount.percent },
       create: discount,
     });
   }

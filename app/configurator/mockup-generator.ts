@@ -1,4 +1,5 @@
 import { getGraphicShapeSvgString } from "../../lib/graphic-shapes";
+import { layoutTextGlyphs } from "../../lib/text-curve-layout";
 
 export interface MockupElement {
   type: "image" | "text" | "shape";
@@ -13,7 +14,9 @@ export interface MockupElement {
   fontFamily?: string;
   fontWeight?: string | number;
   fontStyle?: string;
+  letterSpacing?: number;
   outlined?: boolean;
+  curve?: number;
 }
 
 export interface MockupPrintZone {
@@ -118,14 +121,39 @@ export async function generateMockupPreviewBlob(
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
 
-        if (element.outlined) {
-          ctx.strokeStyle = getContrastingOutlineColor(element.color);
-          ctx.lineWidth = Math.max(2, Math.round(fontSize * 0.08));
-          ctx.strokeText(element.content, 0, 0);
-        }
-
         ctx.fillStyle = element.color || "#111111";
-        ctx.fillText(element.content, 0, 0);
+        ctx.strokeStyle = getContrastingOutlineColor(element.color);
+        ctx.lineWidth = Math.max(2, Math.round(fontSize * 0.08));
+        const characters = Array.from(element.content);
+        const letterSpacing = element.letterSpacing ?? 0;
+        const advances = characters.map((character) => ctx.measureText(character).width + letterSpacing);
+        const curve = element.curve ?? 0;
+
+        if (curve !== 0) {
+          const pathWidth = zoneW * (element.width / 100) * element.scale;
+          const glyphs = layoutTextGlyphs({ content: element.content, pathWidth, curve, advances });
+          glyphs.forEach((glyph) => {
+            ctx.save();
+            ctx.translate(glyph.x, glyph.y);
+            ctx.rotate((glyph.angle * Math.PI) / 180);
+            if (element.outlined) ctx.strokeText(glyph.character, 0, 0);
+            ctx.fillText(glyph.character, 0, 0);
+            ctx.restore();
+          });
+        } else if (letterSpacing !== 0) {
+          const totalWidth = advances.reduce((sum, advance) => sum + advance, 0);
+          let cursor = -totalWidth / 2;
+          characters.forEach((character, index) => {
+            const advance = advances[index];
+            const x = cursor + advance / 2;
+            if (element.outlined) ctx.strokeText(character, x, 0);
+            ctx.fillText(character, x, 0);
+            cursor += advance;
+          });
+        } else {
+          if (element.outlined) ctx.strokeText(element.content, 0, 0);
+          ctx.fillText(element.content, 0, 0);
+        }
       } else if (element.type === "shape" && element.content) {
         try {
           const svgString = getGraphicShapeSvgString(element.content, element.color || "#111111", 100);

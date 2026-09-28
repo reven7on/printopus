@@ -7,3 +7,12 @@ This version has breaking changes — APIs, conventions, and file structure may 
 This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
 
 <!-- END:nextjs-agent-rules -->
+
+## Делегирование задач
+
+Для сложных задач основной агент отвечает за архитектуру, план, интеграцию
+результатов и итоговое ревью. Независимые ограниченные задачи допустимо
+передавать субагентам среднего уровня, максимум трём одновременно. Каждому
+субагенту назначают отдельные файлы или подсистему; для простой однофайловой
+работы субагент не нужен. После делегированной работы основной агент проверяет
+diff и выполняет общие проверки.

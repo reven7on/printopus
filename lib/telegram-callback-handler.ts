@@ -1,133 +1,190 @@
-import { OrderStatus } from "../app/generated/prisma/client";
+import { OrderStatus, Prisma } from "../app/generated/prisma/client";
 import { database } from "./db.ts";
-import { answerCallbackQuery, updateTelegramMessageStatus } from "./telegram.ts";
+import { normalizeOrderSizeBreakdown } from "./order-size-breakdown.ts";
+import {
+  answerCallbackQuery,
+  sendTelegramStatusNotice,
+  updateTelegramMessageStatus,
+  type TelegramOrderPayload,
+} from "./telegram.ts";
+import {
+  isAllowedTelegramTransition,
+  isAuthorizedTelegramCallback,
+  parseStatusCallbackData,
+  type TelegramCallbackQuery,
+} from "./telegram-callback-policy.ts";
 
-export interface TelegramCallbackQuery {
-  id: string;
-  data?: string;
-  message?: {
-    message_id: number;
-    chat: { id: number | string };
-  };
-  from: { first_name: string; username?: string };
-}
+export type { TelegramCallbackQuery } from "./telegram-callback-policy.ts";
 
-const STATUS_NAMES: Record<string, string> = {
-  NEW: "Новый",
+const STATUS_NAMES: Partial<Record<OrderStatus, string>> = {
+  CONFIRMED: "Подтвержден",
   IN_PRODUCTION: "В производстве",
   READY: "Готов к выдаче",
   COMPLETED: "Завершен",
   CANCELLED: "Отменен",
 };
 
-/**
- * Handles incoming Telegram inline button callback queries safely and instantly
- */
+class ConcurrentOrderUpdateError extends Error {}
+
+function toTelegramPayload(order: {
+  id: string;
+  orderNumber: string;
+  customerName: string;
+  customerPhone: string;
+  contactMethod: string;
+  fulfillmentMethod: string;
+  deliveryAddress: string | null;
+  comment: string | null;
+  subtotal: unknown;
+  discountPercent: unknown;
+  total: unknown;
+  status: string;
+  items: Array<{
+    productName: string;
+    colorLabel: string | null;
+    sizeLabel: string | null;
+    sizeBreakdown: unknown;
+    placement: string | null;
+    quantity: number;
+    baseUnitPrice: unknown;
+    unitPrice: unknown;
+    total: unknown;
+    assets: Array<{ id: string; originalName: string; mimeType: string; sizeBytes: number }>;
+  }>;
+}): TelegramOrderPayload {
+  return {
+    ...order,
+    subtotal: Number(order.subtotal),
+    discountPercent: Number(order.discountPercent),
+    total: Number(order.total),
+    items: order.items.map((item) => ({
+      ...item,
+      sizeBreakdown: normalizeOrderSizeBreakdown(item.sizeBreakdown),
+      baseUnitPrice: Number(item.baseUnitPrice),
+      unitPrice: Number(item.unitPrice),
+      total: Number(item.total),
+    })),
+  };
+}
+
+const orderWithAssets = {
+  items: {
+    include: {
+      assets: { select: { id: true, originalName: true, mimeType: true, sizeBytes: true } },
+    },
+  },
+} satisfies Prisma.OrderInclude;
+
+async function acknowledge(queryId: string, text: string, showAlert = false): Promise<void> {
+  try {
+    await answerCallbackQuery(queryId, text, showAlert);
+  } catch (error) {
+    console.warn("[Telegram Handler] Could not acknowledge callback:", error);
+  }
+}
+
+async function notifyFailure(query: TelegramCallbackQuery, text: string): Promise<void> {
+  if (!query.message) return;
+  try {
+    await sendTelegramStatusNotice(query.message.chat.id, query.message.message_id, text);
+  } catch (error) {
+    console.warn("[Telegram Handler] Could not send status notice:", error);
+  }
+}
+
+async function changeOrderStatusAtomically(
+  orderId: string,
+  targetStatus: OrderStatus,
+  query: TelegramCallbackQuery,
+) {
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      return await database.$transaction(async (tx) => {
+        const current = await tx.order.findUnique({ where: { id: orderId }, select: { status: true, orderNumber: true } });
+        if (!current) return { kind: "not_found" as const };
+
+        if (current.status === targetStatus) {
+          const order = await tx.order.findUniqueOrThrow({ where: { id: orderId }, include: orderWithAssets });
+          await tx.order.update({
+            where: { id: orderId },
+            data: { telegramChatId: String(query.message?.chat.id), telegramMessageId: query.message?.message_id },
+          });
+          return { kind: "unchanged" as const, order };
+        }
+        if (!isAllowedTelegramTransition(current.status, targetStatus)) {
+          const order = await tx.order.findUniqueOrThrow({ where: { id: orderId }, include: orderWithAssets });
+          await tx.order.update({
+            where: { id: orderId },
+            data: { telegramChatId: String(query.message?.chat.id), telegramMessageId: query.message?.message_id },
+          });
+          return { kind: "invalid_transition" as const, order };
+        }
+
+        const changed = await tx.order.updateMany({
+          where: { id: orderId, status: current.status },
+          data: {
+            status: targetStatus,
+            telegramChatId: String(query.message?.chat.id),
+            telegramMessageId: query.message?.message_id,
+          },
+        });
+        if (changed.count !== 1) throw new ConcurrentOrderUpdateError();
+
+        const senderName = query.from.username ? `@${query.from.username}` : query.from.first_name;
+        await tx.orderStatusHistory.create({
+          data: {
+            orderId,
+            fromStatus: current.status,
+            toStatus: targetStatus,
+            note: `Изменено из Telegram пользователем ${senderName}`,
+            changedBy: `Telegram (${senderName}, id ${query.from.id})`,
+          },
+        });
+        const order = await tx.order.findUniqueOrThrow({ where: { id: orderId }, include: orderWithAssets });
+        return { kind: "changed" as const, order, previousStatus: current.status };
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    } catch (error) {
+      const isConflict = error instanceof ConcurrentOrderUpdateError
+        || (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034");
+      if (!isConflict || attempt === 3) throw error;
+    }
+  }
+  throw new ConcurrentOrderUpdateError();
+}
+
 export async function handleTelegramCallbackQuery(query: TelegramCallbackQuery): Promise<boolean> {
-  const { id: callbackId, data, message, from } = query;
-  if (!data || !data.startsWith("st:") || !message) {
-    if (callbackId) await answerCallbackQuery(callbackId, "Неверный запрос").catch(() => {});
+  const parsed = parseStatusCallbackData(query.data);
+  if (!query.id || !query.message || !parsed) {
+    if (query.id) await acknowledge(query.id, "Неверный запрос", true);
+    return false;
+  }
+  if (!isAuthorizedTelegramCallback(query)) {
+    await acknowledge(query.id, "У вас нет доступа к управлению заказами", true);
     return false;
   }
 
-  const parts = data.split(":");
-  const targetStatus = parts[1] as OrderStatus;
-  const orderId = parts[2];
-
-  if (!Object.values(OrderStatus).includes(targetStatus) || !orderId) {
-    await answerCallbackQuery(callbackId, "Неизвестный статус").catch(() => {});
-    return false;
-  }
-
-  const readableStatus = STATUS_NAMES[targetStatus] ?? targetStatus;
-
-  // 1. Immediately acknowledge Telegram button click in <100ms so button never spins/freezes
-  await answerCallbackQuery(callbackId, `⏳ Обновляем статус: ${readableStatus}...`).catch(() => {});
+  const readableStatus = STATUS_NAMES[parsed.targetStatus] ?? parsed.targetStatus;
+  await acknowledge(query.id, `Обновляем статус: ${readableStatus}…`);
 
   try {
-    const existing = await database.order.findUnique({
-      where: { id: orderId },
-      select: { id: true, orderNumber: true, status: true },
-    });
-
-    if (!existing) {
-      await answerCallbackQuery(callbackId, "❌ Заказ не найден в базе данных").catch(() => {});
+    const result = await changeOrderStatusAtomically(parsed.orderId, parsed.targetStatus, query);
+    if (result.kind === "not_found") {
+      await notifyFailure(query, "❌ Заказ не найден в базе данных.");
+      return false;
+    }
+    if (result.kind === "invalid_transition") {
+      await updateTelegramMessageStatus(query.message.chat.id, query.message.message_id, toTelegramPayload(result.order));
+      await notifyFailure(query, `⚠️ Для заказа #${result.order.orderNumber} этот переход уже недоступен. Сообщение обновлено до актуального статуса.`);
       return false;
     }
 
-    if (existing.status === targetStatus) {
-      await answerCallbackQuery(callbackId, `ℹ️ Заказ #${existing.orderNumber} уже в статусе "${readableStatus}"`).catch(() => {});
-      return true;
+    await updateTelegramMessageStatus(query.message.chat.id, query.message.message_id, toTelegramPayload(result.order));
+    if (result.kind === "changed") {
+      console.info(`[Telegram Handler] Order #${result.order.orderNumber}: ${result.previousStatus} -> ${parsed.targetStatus} by user ${query.from.id}`);
     }
-
-    const senderName = from.username ? `@${from.username}` : from.first_name;
-
-    const updatedOrder = await database.$transaction(async (tx) => {
-      const updated = await tx.order.update({
-        where: { id: orderId },
-        data: { status: targetStatus },
-        include: {
-          items: {
-            include: {
-              assets: {
-                select: { id: true, originalName: true, mimeType: true, sizeBytes: true },
-              },
-            },
-          },
-        },
-      });
-
-      await tx.orderStatusHistory.create({
-        data: {
-          orderId,
-          fromStatus: existing.status,
-          toStatus: targetStatus,
-          note: `Изменено из Telegram пользователем ${senderName}`,
-          changedBy: `Telegram (${senderName})`,
-        },
-      });
-
-      return updated;
-    });
-
-    if (updatedOrder) {
-      // 2. Notify manager of successful status change toast
-      await answerCallbackQuery(callbackId, `✅ Заказ #${updatedOrder.orderNumber}: ${readableStatus}`).catch(() => {});
-
-      // 3. Update message text and buttons in live Telegram chat
-      await updateTelegramMessageStatus(message.chat.id, message.message_id, {
-        id: updatedOrder.id,
-        orderNumber: updatedOrder.orderNumber,
-        customerName: updatedOrder.customerName,
-        customerPhone: updatedOrder.customerPhone,
-        contactMethod: updatedOrder.contactMethod,
-        fulfillmentMethod: updatedOrder.fulfillmentMethod,
-        deliveryAddress: updatedOrder.deliveryAddress,
-        comment: updatedOrder.comment,
-        subtotal: Number(updatedOrder.subtotal),
-        discountPercent: Number(updatedOrder.discountPercent),
-        total: Number(updatedOrder.total),
-        status: updatedOrder.status,
-        items: updatedOrder.items.map((item) => ({
-          productName: item.productName,
-          colorLabel: item.colorLabel,
-          sizeLabel: item.sizeLabel,
-          placement: item.placement,
-          quantity: item.quantity,
-          baseUnitPrice: Number(item.baseUnitPrice),
-          unitPrice: Number(item.unitPrice),
-          total: Number(item.total),
-          assets: item.assets,
-        })),
-      });
-
-      console.log(`[Telegram Handler] Order #${updatedOrder.orderNumber} status changed: ${existing.status} -> ${targetStatus} by ${senderName}`);
-      return true;
-    }
-  } catch (err) {
-    console.error("[Telegram Handler] Error updating order status:", err);
-    await answerCallbackQuery(callbackId, "❌ Ошибка при обновлении статуса").catch(() => {});
+    return true;
+  } catch (error) {
+    console.error("[Telegram Handler] Failed to process callback:", error);
+    throw error;
   }
-
-  return false;
 }
