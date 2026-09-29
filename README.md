@@ -76,3 +76,7 @@ docker compose --profile telegram up --build
 локальным release-скриптом, а staging и production разворачиваются из bundle
 в `deploy/`. `compose.production.yaml` оставлен совместимым входом в канонический
 image-only стек; `compose.yaml` поднимает полный локальный стек из исходников.
+
+Для временной демонстрации на Render используйте отдельный Blueprint
+`render.yaml` и инструкцию `docs/render.md`. Бесплатная конфигурация имеет
+временную файловую систему и не заменяет production-развёртывание на VPS.

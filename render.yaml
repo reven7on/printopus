@@ -1,0 +1,55 @@
+services:
+  - type: web
+    name: printopus-test
+    runtime: docker
+    plan: free
+    region: frankfurt
+    dockerfilePath: ./Dockerfile.render
+    dockerContext: .
+    healthCheckPath: /api/health
+    maxShutdownDelaySeconds: 30
+    autoDeployTrigger: commit
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DEPLOY_ENV
+        value: staging
+      - key: PORT
+        value: 10000
+      - key: SITE_URL
+        fromService:
+          type: web
+          name: printopus-test
+          envVarKey: RENDER_EXTERNAL_URL
+      - key: DATABASE_URL
+        fromDatabase:
+          name: printopus-test-database
+          property: connectionString
+      - key: UPLOAD_DIR
+        value: /var/lib/printopus/uploads
+      # The free Render filesystem is ephemeral. Set a reserve after attaching
+      # a paid persistent disk to this same service.
+      - key: UPLOAD_MIN_FREE_BYTES
+        value: 0
+      - key: ADMIN_USERNAME
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: ADMIN_SESSION_SECRET
+        generateValue: true
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_ADMIN_CHAT_ID
+        sync: false
+      - key: TELEGRAM_WEBHOOK_SECRET
+        sync: false
+      - key: TELEGRAM_MANAGER_USER_IDS
+        value: ""
+
+databases:
+  - name: printopus-test-database
+    plan: free
+    region: frankfurt
+    databaseName: printopus
+    user: printopus
+    ipAllowList: []
