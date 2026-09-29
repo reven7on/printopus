@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { getAutomaticPrintEstimate } from "../app/configurator/editor-math.ts";
-import { formatBelarusianPhone, getPhoneHref, isValidBelarusianPhone, normalizeBelarusianPhone, normalizePhone } from "../app/order-validation.ts";
+import { formatBelarusianPhone, formatBelarusianPhoneInput, getPhoneHref, isValidBelarusianPhone, normalizeBelarusianPhone, normalizePhone } from "../app/order-validation.ts";
 import {
   calculateOrderQuote,
   OrderInputError,
@@ -67,6 +67,16 @@ test("legacy Belarusian phone formats share one display and dialing value", () =
     assert.equal(formatBelarusianPhone(phone), "+375 (29) 555-20-30");
     assert.equal(getPhoneHref(phone), "tel:+375295552030");
   }
+});
+
+test("phone input formats partial typing and pasted Belarusian numbers", () => {
+  assert.equal(formatBelarusianPhoneInput("2"), "+375 (2");
+  assert.equal(formatBelarusianPhoneInput("29"), "+375 (29)");
+  assert.equal(formatBelarusianPhoneInput("296548290"), "+375 (29) 654-82-90");
+  assert.equal(formatBelarusianPhoneInput("+3753365289"), "+375 (33) 652-89");
+  assert.equal(formatBelarusianPhoneInput("80 29 654-82-90"), "+375 (29) 654-82-90");
+  assert.equal(formatBelarusianPhoneInput("+375 (29) 654-82-90 123"), "+375 (29) 654-82-90");
+  assert.equal(formatBelarusianPhoneInput(""), "");
 });
 
 test("editor estimates print format from the actual artwork dimensions", () => {

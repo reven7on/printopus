@@ -11,7 +11,7 @@ import {
   PRINT_FORMATS,
   PRODUCT_BASE_PRICES,
 } from "../pricing";
-import { isValidBelarusianPhone } from "../order-validation";
+import { formatBelarusianPhoneInput, isValidBelarusianPhone } from "../order-validation";
 import { usePublicCatalog, type PublicCatalog } from "../use-public-catalog";
 import { getAutomaticPrintEstimate } from "./editor-math";
 import { generateMockupPreviewBlob } from "./mockup-generator";
@@ -2863,12 +2863,13 @@ export default function Configurator({ initialCatalog }: { initialCatalog: Publi
                             required
                             autoComplete="tel"
                             inputMode="tel"
+                            maxLength={19}
                             placeholder="+375 (29) 000-00-00"
                             value={customerPhone}
                             aria-invalid={Boolean(phoneError)}
                             aria-describedby={phoneError ? "customer-phone-error" : undefined}
                             onChange={(e) => {
-                              setCustomerPhone(e.target.value);
+                              setCustomerPhone(formatBelarusianPhoneInput(e.target.value));
                               if (phoneError) setPhoneError("");
                             }}
                           />
